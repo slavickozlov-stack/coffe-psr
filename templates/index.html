@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ГОСТ-Документ: АРМ подготовки и нормоконтроля документации</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Tinos:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body class="theme-light">
+
+  <!-- 1. ШАПКА САЙТА (HEADER) -->
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="brand-logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-title">ГОСТ-Документ</span>
+        <span class="brand-subtitle">ВИТИ НИЯУ МИФИ / АРМ Документооборота</span>
+      </div>
+    </div>
+
+    <!-- Индикатор текущего документа и статуса -->
+    <div class="header-doc-status" id="headerDocStatus">
+      <span class="status-badge status-draft" id="statusBadge">Черновик</span>
+      <span class="doc-topic-preview" id="docTopicPreview">Загрузка...</span>
+      <span class="version-pill-tag" id="headerVersionTag" title="Текущая версия отчета">v1</span>
+    </div>
+
+    <!-- Переключатель роли (Сдающий / Проверяющий) -->
+    <div class="header-role-switcher">
+      <span class="role-label">Режим:</span>
+      <button class="role-btn active" id="btnRoleAuthor" onclick="switchRole('author')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+        Сдающий (Автор)
+      </button>
+      <button class="role-btn" id="btnRoleReviewer" onclick="switchRole('reviewer')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+        Проверяющий (Нормоконтроль)
+        <span class="reviewer-header-counter" id="headerPendingBadge" style="display:none;">0</span>
+      </button>
+    </div>
+
+    <!-- Кнопка перехода в Историю изменений (версии) -->
+    <button class="header-version-btn" onclick="openVersionHistoryModal()" title="История изменений и версии отчета">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+      История изменений (<span id="headerVersionCount">1</span>)
+    </button>
+
+    <!-- Поле профиля -->
+    <div class="header-auth" id="headerAuth">
+      <div class="user-pill" id="userPill" onclick="toggleAuthModal()">
+        <div class="user-avatar" id="userAvatar">СК</div>
+        <div class="user-info">
+          <span class="user-name" id="userNameLabel">Козлов В.А.</span>
+          <span class="user-role" id="userRoleLabel">Специалист</span>
+        </div>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </div>
+    </div>
+  </header>
+
+  <!-- ОСНОВНОЙ КОНТЕЙНЕР (ОПТИМИЗИРОВАН ДЛЯ ИСКЛЮЧЕНИЯ СЖАТИЯ) -->
+  <main class="app-main-layout">
+
+    <!-- 2. ЛЕВАЯ ПАНЕЛЬ: СПЕЦИАЛЬНОСТИ, УНИКАЛЬНЫЕ ШАБЛОНЫ И ДОКУМЕНТЫ -->
+    <aside class="left-panel">
+      <!-- Блок выбора специальности -->
+      <div class="panel-section">
+        <div class="section-header">
+          <h3 class="section-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
+            Специальность
+          </h3>
+        </div>
+        <div class="specialty-selector" id="specialtyList">
+          <!-- Заполняется динамически: АЭС, Электрик, Сварщик, Бухгалтер -->
+        </div>
+      </div>
+
+      <!-- Блок выбора уникального шаблона для специальности -->
+      <div class="panel-section">
+        <div class="section-header">
+          <h3 class="section-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+            Шаблон профессии
+          </h3>
+        </div>
+        <div class="template-list" id="templateList">
+          <!-- Заполняется уникальным шаблоном под профессию -->
+        </div>
+      </div>
+
+      <!-- Список всех созданных документов / Отчетов по разным специальностям -->
+      <div class="panel-section panel-section-grow">
+        <div class="section-header">
+          <h3 class="section-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            Мои документы
+          </h3>
+          <button class="btn-icon" title="Создать отчет по текущей специальности" onclick="createNewDocument()">+</button>
+        </div>
+        <div class="document-history-list" id="documentHistoryList">
+          <!-- Список отчетов: Сварщик, Электрик, АЭС, Бухгалтер -->
+        </div>
+      </div>
+    </aside>
+
+    <!-- 3. ЦЕНТРАЛЬНАЯ ПАНЕЛЬ: РЕАЛИСТИЧНЫЙ ДОКУМЕНТ WORD (БЕЛЫЙ ФОН НА ВЕСЬ ШАБЛОН) -->
+    <section class="center-panel" id="authorWorkspace">
+      
+      <!-- Панель замечаний проверяющего (показывается при возврате на доработку) -->
+      <div class="review-feedback-banner" id="reviewFeedbackBanner" style="display: none;">
+        <div class="feedback-banner-header">
+          <div class="feedback-banner-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            Документ возвращен проверяющим на доработку
+          </div>
+          <span class="reviewer-stamp" id="bannerReviewerStamp">Проверил: Руководитель</span>
+        </div>
+        <p class="feedback-banner-text" id="bannerFeedbackText">Обнаружены замечания по расчетам или нормоконтролю.</p>
+        <div class="feedback-comments-list" id="bannerCommentsList"></div>
+      </div>
+
+      <!-- Панель управления Word (Линейка + Масштаб + История изменений) -->
+      <div class="word-ruler-toolbar">
+        <div class="ruler-info">
+          <span class="ruler-badge">ГОСТ 7.32</span>
+          <span>Поля: 30 / 15 / 20 / 20 мм</span>
+          <span>Times New Roman 14 pt</span>
+          <span>Интервал 1.5</span>
+        </div>
+        <div class="ruler-actions">
+          <!-- Кнопка Инженерного ИИ-аналитика -->
+          <button class="btn-ruler-ai" onclick="toggleAiDrawer()" title="Инженерный ИИ-аналитик отчета (справка, структура, план)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+            Инженерный ИИ
+          </button>
+          <!-- Кнопка Истории изменений (версий) -->
+          <button class="btn-version-history-tool" onclick="openVersionHistoryModal()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            История изменений (<span id="versionCountLabel">1</span>)
+          </button>
+          <!-- Масштаб страницы, чтобы не было сжатия на экранах любого размера -->
+          <div class="zoom-controls">
+            <button class="btn-zoom" onclick="changeZoom(-10)">−</button>
+            <span class="zoom-label" id="zoomLevelLabel">95%</span>
+            <button class="btn-zoom" onclick="changeZoom(10)">+</button>
+            <button class="btn-zoom-reset" onclick="setZoom(95)" title="Масштаб по умолчанию">Сброс</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ВОРДОВСКИЙ ХОЛСТ (СВОБОДНЫЙ СКРОЛЛ, НИКАКОГО СЖАТИЯ) -->
+      <div class="word-canvas-wrapper" id="wordCanvasWrapper">
+        <div class="word-pages-container" id="wordPagesContainer" style="transform: scale(0.95); transform-origin: top center;">
+          
+          <!-- СТРАНИЦА 1: ТИТУЛЬНЫЙ ЛИСТ (БЕЛЫЙ ЛИСТ А4) -->
+          <div class="word-a4-page" id="pageTitle">
+            <div class="page-top-margin-indicator">Страница 1 • Титульный лист</div>
+            
+            <div class="word-title-block">
+              <div class="word-title-top">
+                <textarea class="word-input-org" id="inputOrg" rows="2" placeholder="Наименование министерства и вуза / предприятия">МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ РОССИЙСКОЙ ФЕДЕРАЦИИ
+ВИТИ НИЯУ МИФИ</textarea>
+              </div>
+
+              <div class="word-title-center">
+                <input type="text" class="word-input-doc-type" id="inputDocType" value="ТЕХНИЧЕСКИЙ ОТЧЕТ" placeholder="ВИД ДОКУМЕНТА">
+                <div class="word-specialty-subtitle">
+                  по специальности: «<span id="titleSpecialtyLabel">Работники АЭС</span>»
+                </div>
+                <div class="word-topic-row">
+                  <span class="topic-caption">Тема:</span>
+                  <input type="text" class="word-input-topic" id="inputTopic" value="Тема работы" placeholder="Введите тему работы">
+                </div>
+              </div>
+
+              <div class="word-title-signatures">
+                <div class="signature-row">
+                  <span class="signature-label">Выполнил:</span>
+                  <input type="text" class="word-input-sign" id="inputAuthorName" value="Козлов В.А." placeholder="ФИО исполнителя">
+                </div>
+                <div class="signature-row">
+                  <span class="signature-label">Проверил (Руководитель):</span>
+                  <input type="text" class="word-input-sign" id="inputReviewerName" value="Профессор Смирнов А.В." placeholder="ФИО руководителя/проверяющего">
+                </div>
+              </div>
+
+              <div class="word-title-bottom">
+                <input type="text" class="word-input-city" id="inputCity" value="Волгодонск">
+                ,
+                <input type="number" class="word-input-year" id="inputYear" value="2026">
+              </div>
+            </div>
+          </div>
+
+          <div class="word-page-break-gap">
+            <span>─────── Разрыв страницы (Начало содержательной части) ───────</span>
+          </div>
+
+          <!-- СТРАНИЦА 2: ВЕСЬ ШАБЛОН НА ЧИСТОМ БЕЛОМ ЛИСТЕ А4 -->
+          <div class="word-a4-page" id="pageContent">
+            <div class="page-top-margin-indicator">Страница 2 • Содержательная часть отчета</div>
+            
+            <div class="word-body-sections-flow" id="sectionsContainer">
+              <!-- Разделы рендерятся прямо на белом листе со 100% белым фоном -->
+            </div>
+
+            <div class="word-add-section-bar">
+              <button class="btn-word-add-section" onclick="addNewSection()">
+                + Добавить новый раздел в отчет
+              </button>
+            </div>
+          </div>
+
+          <div class="word-page-break-gap">
+            <span>─────── Разрыв страницы (Список использованных источников) ───────</span>
+          </div>
+
+          <!-- СТРАНИЦА 3: БИБЛИОГРАФИЯ (БЕЛЫЙ ЛИСТ А4) -->
+          <div class="word-a4-page" id="pageBib">
+            <div class="page-top-margin-indicator">Страница 3 • Библиографический список по ГОСТ Р 7.0.5</div>
+            
+            <div class="word-bibliography-block" id="bibliographyBlock">
+              <h3 class="word-bib-heading">СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ</h3>
+              <p class="word-bib-hint">
+                * Источник попадает сюда <b>только тогда, когда вы вставили фрагмент в шаблон</b> (через кнопку или вставку Ctrl+V / ⌘+V).
+              </p>
+              <ol class="word-bib-ordered-list" id="bibList">
+                <!-- Источники -->
+              </ol>
+              <div class="word-bib-actions">
+                <button class="btn-text-link" onclick="promptAddCustomCitation()">+ Добавить источник вручную</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- НИЖНЯЯ ПАНЕЛЬ ДЕЙСТВИЙ (FOOTER TOOLBAR) -->
+      <footer class="center-toolbar">
+        <div class="toolbar-left">
+          <button class="btn-action btn-save" id="btnSave" onclick="saveCurrentDocument(true)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            Сохранить черновик
+          </button>
+          <button class="btn-action btn-check-gost" id="btnCheckGost" onclick="runAiGostCheck()">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9 12l2 2 4-4"></path></svg>
+            Проверить по ГОСТ (ИИ)
+          </button>
+        </div>
+
+        <div class="toolbar-right">
+          <div class="export-group">
+            <button class="btn-export" onclick="exportDocument('docx')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              Скачать .DOCX (ГОСТ)
+            </button>
+            <button class="btn-export btn-export-secondary" onclick="exportDocument('txt')">
+              Скачать .TXT
+            </button>
+          </div>
+          <!-- Кнопка отправки с сохранением истории изменений -->
+          <button class="btn-action btn-submit-review" id="btnSubmitReview" onclick="openSubmitModal()">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            Отправить на проверку
+          </button>
+        </div>
+      </footer>
+    </section>
+
+
+    <!-- РАБОЧАЯ ОБЛАСТЬ ПРОВЕРЯЮЩЕГО (ОТОБРАЖАЕТ ВСЕ ФАЙЛЫ В ОЧЕРЕДИ С ИСТОРИЕЙ) -->
+    <section class="center-panel reviewer-workspace" id="reviewerWorkspace" style="display: none;">
+      <div class="reviewer-header-bar">
+        <div>
+          <h2>Кабинет проверяющего (Нормоконтроль)</h2>
+          <p class="subtitle">Поступившие отчеты от специалистов разных отраслей (Сварщик, Электрик, АЭС, Бухгалтер)</p>
+        </div>
+        <div class="reviewer-stats">
+          <span class="badge-count-pulse" id="pendingCountBadge">0 отчетов на рассмотрении</span>
+        </div>
+      </div>
+
+      <div class="reviewer-content-grid">
+        <!-- Очередь поступивших файлов на проверку -->
+        <div class="reviewer-queue-card">
+          <div class="queue-card-title">
+            <span>Очередь отчетов</span>
+            <span class="queue-live-dot">● В реальном времени</span>
+          </div>
+          <div class="queue-list" id="reviewerDocQueue">
+            <!-- Заполняется только поступившими на проверку отчетами -->
+          </div>
+        </div>
+
+        <!-- Область подробного рецензирования выбранного отчета -->
+        <div class="reviewer-inspect-card" id="inspectDocumentCard" style="display:none;">
+          <div class="inspect-header">
+            <div>
+              <div class="inspect-specialty-badge" id="inspectDocSpecialtyBadge">Специалист</div>
+              <h3 id="inspectDocTitle">Название отчета</h3>
+              <div class="inspect-meta" id="inspectDocMeta">Автор: Козлов В.А. | Статус: На рассмотрении</div>
+            </div>
+            <div class="inspect-quick-downloads">
+              <span class="version-pill-tag" id="inspectDocVersionBadge">v1</span>
+              <button class="btn-export" onclick="exportCurrentInspectedDoc('docx')">Скачать DOCX</button>
+              <button class="btn-export btn-export-secondary" onclick="exportCurrentInspectedDoc('txt')">TXT</button>
+            </div>
+          </div>
+
+          <!-- Панель инструментов нормоконтролера для выделения ошибок красным цветом -->
+          <div class="reviewer-annotation-toolbar">
+            <div class="annotation-tool-group">
+              <button type="button" class="btn-mark-error-action" id="btnMarkSelectedError" onclick="markSelectedTextAsError()" title="Выделите любой текст в документе и нажмите, чтобы подсветить ошибку красным">
+                <span class="red-circle-dot"></span>
+                Выделить ошибку в тексте (красным)
+              </button>
+              <button type="button" class="btn-mark-clear-action" onclick="clearSelectedErrorHighlight()" title="Снять выделение последней ошибки">
+                Очистить замечание
+              </button>
+            </div>
+            <div class="annotation-status-info">
+              <span class="error-counter-badge" id="errorCounterBadge">Ошибок выделено: 0</span>
+              <span class="annotation-tip">Выделите фрагмент текста в отчете мышкой и нажмите «Выделить ошибку»</span>
+            </div>
+          </div>
+
+          <!-- Интерактивный текст отчета для проверки и разметки ошибок -->
+          <div class="inspect-document-body" id="inspectDocBody"></div>
+
+          <!-- Форма вердикта проверяющего -->
+          <div class="reviewer-verdict-box">
+            <div class="verdict-box-header">
+              <h4>Решение нормоконтролера по данному отчету:</h4>
+              <span class="verdict-version-hint" id="verdictVersionHint">Ревизия отчета</span>
+            </div>
+            
+            <div class="verdict-form-group">
+              <label>Общий отзыв проверяющего:</label>
+              <textarea id="reviewerFeedbackInput" rows="2" placeholder="Укажите замечания по расчетам, оформлению ГОСТ или подтвердите качество работы..."></textarea>
+            </div>
+
+            <!-- Список выделенных замечаний и ошибок -->
+            <div class="verdict-add-comment">
+              <div class="verdict-comments-heading">
+                <span>Выделенные в тексте ошибки и замечания:</span>
+                <span class="comments-help-text">(автоматически появляются при выделении текста выше)</span>
+              </div>
+              <ul class="staged-comments-list" id="stagedCommentsList"></ul>
+            </div>
+
+            <div class="verdict-actions-row">
+              <button class="btn-action btn-return-rework" onclick="submitReviewVerdict('returned')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"></path><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+                Отправить обратно на доработку (с замечаниями)
+              </button>
+              <button class="btn-action btn-approve" onclick="submitReviewVerdict('approved')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                Утвердить и принять отчет
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+
+    <!-- 4. ПРАВАЯ ПАНЕЛЬ: БАЗА ДОКУМЕНТОВ ДЛЯ ВЫБРАННОЙ ПРОФЕССИИ + НЕЙРОСЕТЬ -->
+    <aside class="right-panel">
+      
+      <!-- Вкладки правой панели -->
+      <div class="right-panel-tabs">
+        <button class="right-tab active" id="tabDocs" onclick="switchRightTab('docs')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+          База документов
+        </button>
+        <button class="right-tab" id="tabAi" onclick="switchRightTab('ai')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          ИИ-Ассистент
+        </button>
+      </div>
+
+      <!-- Вкладка: База документов специальности -->
+      <div class="right-tab-content active" id="tabContentDocs">
+        
+        <div class="norm-specialty-header">
+          <span class="norm-badge-label" id="normSpecialtyFilterBadge">Документы: Работники АЭС</span>
+          <span class="norm-shared-hint">+ общие ГОСТы</span>
+        </div>
+
+        <div class="norm-docs-toolbar">
+          <div class="search-box">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="text" id="normSearchInput" placeholder="Поиск по документам..." oninput="filterNormDocs()">
+          </div>
+          <button class="btn-icon" title="Загрузить новый документ" onclick="openUploadModal()">+</button>
+        </div>
+
+        <!-- Список нормативных документов (свои для профессии + общие) -->
+        <div class="norm-doc-list" id="normDocsList"></div>
+
+        <!-- Область чтения и цитирования выбранного документа -->
+        <div class="doc-reader-card" id="docReaderCard" style="display: none;">
+          <div class="reader-header">
+            <div>
+              <span class="reader-code" id="readerDocCode">ШИФР</span>
+              <h4 class="reader-title" id="readerDocTitle">Наименование</h4>
+            </div>
+            <button class="btn-close-sm" onclick="closeDocReader()">✕</button>
+          </div>
+
+          <div class="reader-citation-rule-badge">
+            <b>Правило ГОСТ Р 7.0.5:</b> Источник включается в список литературы при вставке фрагмента в место курсора или через Ctrl+V / ⌘+V.
+          </div>
+
+          <div class="reader-actions-bar">
+            <button class="btn-sm btn-ai-action" onclick="summarizeCurrentNormDoc()" title="Краткая инженерная выжимка стандарта">
+              Аналитическая справка
+            </button>
+            <button class="btn-sm btn-cite-action" onclick="useDocFragmentInWork()" title="Вставить цитату в текущее положение курсора">
+              Вставить в место курсора (+ в библиографию)
+            </button>
+          </div>
+
+          <!-- Текст документа для чтения -->
+          <div class="reader-content-body" id="readerDocContent" title="Выделите фрагмент и нажмите «Вставить в шаблон»"></div>
+        </div>
+
+      </div>
+
+      <!-- Вкладка: ИИ-Ассистент / Нейросеть -->
+      <div class="right-tab-content" id="tabContentAi">
+        <div class="ai-assistant-pro-card">
+          
+          <!-- Шапка ИИ-ассистента -->
+          <div class="ai-pro-header">
+            <div class="ai-pro-avatar">
+              <span class="ai-pro-avatar-glow"></span>
+              ИИ
+            </div>
+            <div class="ai-pro-meta">
+              <div class="ai-pro-title">Инженерный ИИ-Аналитик</div>
+              <div class="ai-pro-status">
+                <span class="status-dot-green"></span>
+                Нейросеть ГОСТ и НД • ВИТИ НИЯУ МИФИ
+              </div>
+            </div>
+          </div>
+
+          <!-- Быстрые инженерные запросы (чипсы) -->
+          <div class="ai-quick-chips-row">
+            <button type="button" class="ai-chip-btn" onclick="askAiQuickPreset('summary')" title="Краткая инженерная выжимка">
+              <span class="chip-accent-dot cyan"></span> Выжимка
+            </button>
+            <button type="button" class="ai-chip-btn" onclick="askAiQuickPreset('limits')" title="Пределы безопасной эксплуатации">
+              <span class="chip-accent-dot amber"></span> Безопасность
+            </button>
+            <button type="button" class="ai-chip-btn" onclick="askAiQuickPreset('params')" title="Параметры первого контура и нормы">
+              <span class="chip-accent-dot purple"></span> Параметры
+            </button>
+            <button type="button" class="ai-chip-btn" onclick="askAiQuickPreset('conclusion')" title="Сформулировать заключение">
+              <span class="chip-accent-dot green"></span> Выводы
+            </button>
+          </div>
+
+          <!-- Карточка структурированной аналитики стандарта -->
+          <div class="ai-structured-summary-box" id="aiSummaryBox">
+            <div class="ai-placeholder-banner">
+              <div class="ai-placeholder-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+              </div>
+              <div class="ai-placeholder-text">
+                Выберите документ в базе и нажмите <b>«Аналитическая справка»</b> или выберите быстрый запрос выше.
+              </div>
+            </div>
+          </div>
+
+          <!-- Инженерный диалог и консультации -->
+          <div class="ai-interactive-chat-panel">
+            <div class="chat-section-title">
+              <span>Запрос к инженерной нейросети:</span>
+            </div>
+            
+            <div class="ai-chat-input-wrapper">
+              <input type="text" id="aiQuestionInput" 
+                placeholder="Вопрос по ГОСТ, ПУЭ, регламенту..." 
+                onkeydown="if(event.key==='Enter') askAiQuestion()">
+              <button class="btn-send-pro-ai" onclick="askAiQuestion()" title="Отправить запрос нейросети">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+              </button>
+            </div>
+
+            <div class="ai-answer-pro-box" id="aiAnswerBox" style="display: none;"></div>
+          </div>
+
+          <!-- Экспертиза оформления по ГОСТ 7.32 -->
+          <div class="ai-normocontrol-pro-box" id="aiNormoBox" style="display: none;">
+            <div class="normo-pro-header">
+              <div class="normo-pro-title">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9 12l2 2 4-4"></path></svg>
+                Нормоконтроль ГОСТ:
+              </div>
+              <span class="normo-pro-score" id="normoScoreBadge">100 / 100</span>
+            </div>
+            <ul class="normo-pro-issues-list" id="normoIssuesList"></ul>
+          </div>
+
+        </div>
+      </div>
+
+    </aside>
+
+  </main>
+
+  <!-- МОДАЛЬНОЕ ОКНО: ОТПРАВКА НА ПРОВЕРКУ С АВТОМАТИЧЕСКИМ ПОВЫШЕНИЕМ ВЕРСИИ -->
+  <div class="modal-backdrop" id="submitModal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h3>Отправка отчета проверяющему</h3>
+          <span class="version-pill-tag" id="submitNextVerBadge">v1</span>
+        </div>
+        <button class="btn-close" onclick="closeSubmitModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:12px; color:#475569; line-height:1.45;">
+          Отчет будет автоматически зафиксирован как <b id="submitNextVerText">Версия v1</b>. Проверяющий (нормоконтроль) получит уведомление и документ в свою очередь.
+        </p>
+        <div class="form-group">
+          <label>Примечание к версии (заполняется автоматически):</label>
+          <input type="text" id="submitChangelogInput" placeholder="Первоначальная редакция / Исправления по замечаниям">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeSubmitModal()">Отмена</button>
+        <button class="btn-primary" id="btnConfirmSubmit" onclick="confirmSubmitForReview()">Отправить отчет на нормоконтроль</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ОТДЕЛЬНОЕ ОКНО ИИ-ПОМОЩНИКА (ИНЖЕНЕРНЫЙ АНАЛИТИК ВИТИ НИЯУ МИФИ) -->
+  <aside class="ai-drawer-overlay" id="aiAssistantDrawer">
+    <div class="ai-drawer-header">
+      <div class="ai-drawer-title-group">
+        <div class="ai-drawer-icon-box">ИИ</div>
+        <div>
+          <div class="ai-drawer-title">Инженерный ИИ-аналитик</div>
+          <div class="ai-drawer-subtitle">ВИТИ НИЯУ МИФИ • Экспертный анализ документа</div>
+        </div>
+      </div>
+      <button class="btn-close" style="color:#94a3b8;" onclick="closeAiDrawer()">✕</button>
+    </div>
+
+    <!-- Вкладки окна ИИ -->
+    <div class="ai-drawer-tabs">
+      <button class="ai-drawer-tab-btn active" id="aiTabBtnSummary" onclick="switchAiDrawerTab('summary')">Справка</button>
+      <button class="ai-drawer-tab-btn" id="aiTabBtnToc" onclick="switchAiDrawerTab('toc')">Содержание</button>
+      <button class="ai-drawer-tab-btn" id="aiTabBtnPlan" onclick="switchAiDrawerTab('plan')">План</button>
+      <button class="ai-drawer-tab-btn" id="aiTabBtnNormo" onclick="switchAiDrawerTab('normo')">ГОСТ-контроль</button>
+      <button class="ai-drawer-tab-btn" id="aiTabBtnChat" onclick="switchAiDrawerTab('chat')">Чат</button>
+    </div>
+
+    <div class="ai-drawer-body">
+      <!-- Вкладка 1: Справка по документу -->
+      <div class="ai-subtab-pane active" id="aiPaneSummary">
+        <div class="ai-card-block">
+          <div class="ai-card-block-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            Инженерный паспорт документа
+          </div>
+          <div class="ai-info-row">
+            <span class="ai-info-label">Специальность:</span>
+            <span class="ai-info-val" id="aiDocSpecialty">—</span>
+          </div>
+          <div class="ai-info-row">
+            <span class="ai-info-label">Вид документа:</span>
+            <span class="ai-info-val" id="aiDocType">—</span>
+          </div>
+          <div class="ai-info-row">
+            <span class="ai-info-label">Тема работы:</span>
+            <span class="ai-info-val" id="aiDocTopic">—</span>
+          </div>
+          <div class="ai-info-row">
+            <span class="ai-info-label">Исполнитель:</span>
+            <span class="ai-info-val" id="aiDocAuthor">—</span>
+          </div>
+          <div class="ai-info-row">
+            <span class="ai-info-label">Текущая версия:</span>
+            <span class="ai-info-val" id="aiDocVersion">v1</span>
+          </div>
+        </div>
+
+        <div class="ai-card-block">
+          <div class="ai-card-block-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+            Краткое содержание и назначение
+          </div>
+          <p id="aiExecutiveSummaryText" style="font-size:11px; line-height:1.45; color:#cbd5e1; margin:0;">
+            Формирование аналитического резюме...
+          </p>
+        </div>
+
+        <div class="ai-card-block">
+          <div class="ai-card-block-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+            Примененная нормативная база
+          </div>
+          <ul id="aiNormListPreview" style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px;"></ul>
+        </div>
+      </div>
+
+      <!-- Вкладка 2: Содержание отчета (структура) -->
+      <div class="ai-subtab-pane" id="aiPaneToc" style="display:none;">
+        <div class="ai-card-block">
+          <div class="ai-card-block-title">Структура разделов отчета</div>
+          <div id="aiTocList" style="display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
+      </div>
+
+      <!-- Вкладка 3: План выполнения и контрольные точки -->
+      <div class="ai-subtab-pane" id="aiPanePlan" style="display:none;">
+        <div class="ai-card-block">
+          <div class="ai-card-block-title">План подготовки и контрольные точки</div>
+          <div class="ai-plan-step">
+            <div class="ai-plan-num done">✓</div>
+            <div class="ai-plan-details">
+              <div class="ai-plan-name">1. Подготовка титульного листа и выбор шаблона</div>
+              <div class="ai-plan-status">Статус: Завершено в соответствии с отраслевым стандартом</div>
+            </div>
+          </div>
+          <div class="ai-plan-step">
+            <div class="ai-plan-num done">✓</div>
+            <div class="ai-plan-details">
+              <div class="ai-plan-name">2. Ввод технологических расчетов и параметров</div>
+              <div class="ai-plan-status">Статус: Заполнено в прозрачных полях шаблона</div>
+            </div>
+          </div>
+          <div class="ai-plan-step">
+            <div class="ai-plan-num">3</div>
+            <div class="ai-plan-details">
+              <div class="ai-plan-name">3. Цитирование нормативных документов и библиография</div>
+              <div class="ai-plan-status">Статус: Автоматический учет по ГОСТ Р 7.0.5 при вставке</div>
+            </div>
+          </div>
+          <div class="ai-plan-step">
+            <div class="ai-plan-num">4</div>
+            <div class="ai-plan-details">
+              <div class="ai-plan-name">4. Передача на нормоконтроль проверяющему</div>
+              <div class="ai-plan-status">Статус: Ожидание отправки с фиксацией версии</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Вкладка 4: ГОСТ-контроль -->
+      <div class="ai-subtab-pane" id="aiPaneNormo" style="display:none;">
+        <div class="ai-card-block">
+          <div class="ai-card-block-title">Проверка соответствия ГОСТ 7.32-2017</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <span style="font-size:11px; color:#94a3b8;">Итоговый индекс качества:</span>
+            <span style="font-size:12px; font-weight:800; color:#10b981;" id="aiDrawerScore">98 / 100</span>
+          </div>
+          <ul id="aiDrawerChecklist" style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px;"></ul>
+        </div>
+      </div>
+
+      <!-- Вкладка 5: Инженерный диалог -->
+      <div class="ai-subtab-pane" id="aiPaneChat" style="display:none;">
+        <div class="ai-card-block">
+          <div class="ai-card-block-title">Консультация с инженерным экспертом</div>
+          <div style="display:flex; gap:6px; margin-bottom:8px;">
+            <input type="text" id="aiDrawerQueryInput" placeholder="Вопрос по ГОСТ, НП, ПУЭ или расчетам..." 
+              style="flex:1; background:#0b1120; border:1px solid #334155; color:#f8fafc; padding:6px 8px; border-radius:4px; font-size:11px;"
+              onkeydown="if(event.key==='Enter') executeAiDrawerQuery()">
+            <button class="btn-primary" style="padding:6px 10px; font-size:11px;" onclick="executeAiDrawerQuery()">Запрос</button>
+          </div>
+          <div id="aiDrawerAnswerBox" style="background:#0b1120; border:1px solid #334155; border-radius:4px; padding:10px; font-size:11px; line-height:1.45; color:#cbd5e1; min-height:80px;">
+            Задайте вопрос экспертной системе по выбранному нормативному документу или параметрам безопасности реакторной установки.
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- МОДАЛЬНОЕ ОКНО: ИСТОРИЯ ИЗМЕНЕНИЙ (ВЕРСИИ ОТЧЕТА) -->
+  <div class="modal-backdrop" id="versionHistoryModal" style="display: none;">
+    <div class="modal-card modal-card-lg">
+      <div class="modal-header">
+        <div>
+          <h3>История изменений (версии отчета)</h3>
+          <span style="font-size:11px; color:#64748b;" id="versionHistoryDocTitle">Название отчета</span>
+        </div>
+        <button class="btn-close" onclick="closeVersionHistoryModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="version-timeline-list" id="versionTimelineList">
+          <!-- Список версий: v1, v2, v3... -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeVersionHistoryModal()">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ВСПЛЫВАЮЩИЕ УВЕДОМЛЕНИЯ (TOAST) -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- МОДАЛЬНОЕ ОКНО: АВТОРИЗАЦИЯ / ПРОФИЛЬ -->
+  <div class="modal-backdrop" id="authModal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Личный кабинет / Профиль</h3>
+        <button class="btn-close" onclick="toggleAuthModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Ваше ФИО (для титульного листа):</label>
+          <input type="text" id="userFullNameInput" value="Козлов В.А.">
+        </div>
+        <div class="form-group">
+          <label>Логин / Email:</label>
+          <input type="text" id="userLoginInput" value="slavickozlov-stack">
+        </div>
+        <div class="form-group">
+          <label>Текущая специальность:</label>
+          <select id="userSpecialtySelect">
+            <option value="Работники АЭС">Работники АЭС</option>
+            <option value="Электрик">Электрик</option>
+            <option value="Сварщик">Сварщик</option>
+            <option value="Бухгалтер">Бухгалтер</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>ФИО руководителя / нормоконтролера:</label>
+          <input type="text" id="userReviewerInput" value="Профессор Смирнов А.В.">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="toggleAuthModal()">Отмена</button>
+        <button class="btn-primary" onclick="saveUserProfile()">Сохранить профиль</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛЬНОЕ ОКНО: ЗАГРУЗКА ДОКУМЕНТА -->
+  <div class="modal-backdrop" id="uploadModal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Загрузка документа в базу знаний</h3>
+        <button class="btn-close" onclick="closeUploadModal()">✕</button>
+      </div>
+      <form id="uploadDocForm" onsubmit="handleUploadDocSubmit(event)">
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Наименование документа:</label>
+            <input type="text" name="title" required placeholder="Напр.: Технологический регламент">
+          </div>
+          <div class="form-group">
+            <label>Шифр / Номер стандарта:</label>
+            <input type="text" name="code" required placeholder="Напр.: ТР-01 / ГОСТ Р 12.3.003">
+          </div>
+          <div class="form-group">
+            <label>Специальность (кому доступен документ):</label>
+            <select name="category" required>
+              <option value="Работники АЭС">Работники АЭС</option>
+              <option value="Электрик">Электрик</option>
+              <option value="Сварщик">Сварщик</option>
+              <option value="Бухгалтер">Бухгалтер</option>
+              <option value="Общий">Общий (будет доступен всем специальностям)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Файл документа (.txt, .md, .doc, .docx):</label>
+            <input type="file" name="file" required accept=".txt,.md,.doc,.docx">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-secondary" onclick="closeUploadModal()">Отмена</button>
+          <button type="submit" class="btn-primary">Загрузить и проиндексировать</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
