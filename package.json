@@ -1,0 +1,16 @@
+{
+  "name": "gost-doc-platform",
+  "version": "1.0.0",
+  "description": "Автоматизированное рабочее место (АРМ) подготовки, оформления и нормоконтроля документации по ГОСТ",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "build": "echo 'Build complete'"
+  },
+  "dependencies": {
+    "docx": "^9.13.0",
+    "express": "^5.3.0",
+    "multer": "^2.4.0"
+  }
+}
