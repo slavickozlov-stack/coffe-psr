@@ -16,8 +16,15 @@ const {
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
-app.use('/static', express.static(path.join(__dirname, 'static')));
+app.use('/static', express.static(path.join(__dirname, 'static'), { etag: false, lastModified: false }));
 
 const DATA_DIR = path.join(__dirname, 'data');
 const DOCS_FILE = path.join(DATA_DIR, 'documents.json');
@@ -852,5 +859,21 @@ app.get('/api/documents/:doc_id/export/txt', (req, res) => {
 
 const PORT = Number(process.env.PORT) || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`ГОСТ-Документ сервер запущен на http://0.0.0.0:${PORT}`);
+  const localUrl = `http://localhost:${PORT}`;
+  console.log('==========================================================');
+  console.log(' ГОСТ-Документ (последняя версия) успешно запущен!');
+  console.log(` Откройте в браузере: ${localUrl}`);
+  console.log('==========================================================');
+
+  // Если запущено на локальном компьютере (не в облачном контейнере AI Studio), автоматически открываем браузер
+  if (!process.env.K_SERVICE && !process.env.APPLET_ID && !process.env.CLOUD_RUN_TIMEOUT_SECONDS) {
+    const { exec } = require('child_process');
+    const cmd =
+      process.platform === 'win32'
+        ? `start "" "${localUrl}"`
+        : process.platform === 'darwin'
+        ? `open "${localUrl}"`
+        : `xdg-open "${localUrl}"`;
+    exec(cmd, () => {});
+  }
 });

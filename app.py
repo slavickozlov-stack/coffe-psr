@@ -3,11 +3,12 @@
 """
 
 import os
+import threading
+import webbrowser
 from typing import Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Depends
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from database import db
@@ -30,7 +31,15 @@ os.makedirs(os.path.join(STATIC_DIR, "js"), exist_ok=True)
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-templates = Jinja2Templates(directory=TEMPLATES_DIR)
+
+
+@app.middleware("http")
+async def disable_browser_cache(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 # --- СХЕМЫ ДАННЫХ ---
@@ -93,8 +102,8 @@ class AIAskModel(BaseModel):
 # --- МАРШРУТЫ HTML ---
 
 @app.get("/", response_class=HTMLResponse)
-async def index_page(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+async def index_page():
+    return FileResponse(os.path.join(TEMPLATES_DIR, "index.html"))
 
 
 # --- API ЭНДПОИНТЫ ---
@@ -294,4 +303,11 @@ def export_txt(doc_id: str):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "3000"))
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
+    url = f"http://localhost:{port}"
+    print("==========================================================")
+    print(" ГОСТ-Документ (последняя версия) успешно запущен!")
+    print(f" Откройте в браузере: {url}")
+    print("==========================================================")
+    if not os.getenv("K_SERVICE") and not os.getenv("APPLET_ID"):
+        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
