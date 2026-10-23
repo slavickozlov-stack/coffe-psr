@@ -34,13 +34,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadSpecialties();
   await loadUserDocuments();
   setupCitationTracking();
+  setupTitleInputsEditTracking();
   applyZoom();
   document.addEventListener('selectionchange', saveCurrentCaret);
 });
 
 
 // ========================================================
-// 1. ШАПКА И РОЛИ
+// 1. ШАПКА И РОЛИ (ПОЛНОЭКРАННЫЙ РЕЖИМ ПРОВЕРЯЮЩЕГО БЕЗ БОКОВЫХ ОКОН)
 // ========================================================
 
 function switchRole(role) {
@@ -49,19 +50,49 @@ function switchRole(role) {
   const btnReviewer = document.getElementById('btnRoleReviewer');
   const authorWorkspace = document.getElementById('authorWorkspace');
   const reviewerWorkspace = document.getElementById('reviewerWorkspace');
+  const leftPanel = document.getElementById('leftPanel');
+  const rightPanel = document.getElementById('rightPanel');
+  const mainLayout = document.getElementById('appMainLayout');
 
   if (role === 'author') {
     btnAuthor.classList.add('active');
     btnReviewer.classList.remove('active');
+    if (leftPanel) leftPanel.style.display = 'flex';
+    if (rightPanel) rightPanel.style.display = 'flex';
+    if (mainLayout) mainLayout.classList.remove('reviewer-mode-active');
     authorWorkspace.style.display = 'flex';
     reviewerWorkspace.style.display = 'none';
   } else {
     btnReviewer.classList.add('active');
     btnAuthor.classList.remove('active');
+    // Убираем боковые окна полностью для проверяющего, оставляем только широкое центральное окно
+    if (leftPanel) leftPanel.style.display = 'none';
+    if (rightPanel) rightPanel.style.display = 'none';
+    if (mainLayout) mainLayout.classList.add('reviewer-mode-active');
     authorWorkspace.style.display = 'none';
     reviewerWorkspace.style.display = 'flex';
     loadReviewerQueue();
   }
+}
+
+function setupTitleInputsEditTracking() {
+  const titleInputIds = [
+    'inputOrg',
+    'inputDocType',
+    'inputTopic',
+    'inputAuthorName',
+    'inputReviewerName',
+    'inputCity',
+    'inputYear'
+  ];
+  titleInputIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', () => {
+        triggerAuthorEditTransition();
+      });
+    }
+  });
 }
 
 function toggleAuthModal() {
@@ -288,6 +319,8 @@ async function createDocumentForSpecialty(specId) {
     author_specialty: spec.name,
     specialty_id: specId,
     status: 'draft',
+    current_version: 1,
+    versions: [],
     title_data: {
       org: 'МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ РОССИЙСКОЙ ФЕДЕРАЦИИ\nВИТИ НИЯУ МИФИ',
       doc_type: tmpl.doc_type || 'ТЕХНИЧЕСКИЙ ОТЧЕТ',
@@ -315,11 +348,19 @@ function createNewDocument() {
 
 
 // ========================================================
-// 3. ЦЕНТРАЛЬНАЯ ПАНЕЛЬ: ОФОРМЛЕНИЕ В СТИЛЕ WORD (БЕЛЫЙ ЛИСТ ВЕЗДЕ)
+// 3. ЦЕНТРАЛЬНАЯ ПАНЕЛЬ: ОФОРМЛЕНИЕ В СТИЛЕ WORD И СИСТЕМА ВЕРСИЙ (v1 -> v2 -> v3)
 // ========================================================
 
 function loadDocumentIntoEditor(doc) {
   currentDoc = doc;
+  if (!currentDoc.current_version) {
+    currentDoc.current_version = (currentDoc.versions && currentDoc.versions.length > 0)
+      ? currentDoc.versions[currentDoc.versions.length - 1].version_number
+      : 1;
+  }
+  if (!Array.isArray(currentDoc.versions)) {
+    currentDoc.versions = [];
+  }
 
   updateHeaderStatus(doc.status, doc.title_data?.topic);
 
@@ -343,32 +384,62 @@ function loadDocumentIntoEditor(doc) {
   // Проверка замечаний проверяющего
   handleReviewFeedbackBanner(doc);
 
-  // Обновление номера и количества версий в шапке и линейке
+  // Обновление рабочей версии и количества прошлых версий в истории
   updateDocumentVersionTags(doc);
 }
 
 function updateDocumentVersionTags(doc) {
-  const vLen = (doc.versions && doc.versions.length) || 1;
-  const isDraft = doc.status === 'draft';
-  const isReturned = doc.status === 'returned';
+  const curVer = doc.current_version || 1;
+  const pastVersionsCount = Array.isArray(doc.versions) ? doc.versions.length : 0;
 
-  let tagText = `v${vLen}`;
-  if (isDraft && (!doc.versions || doc.versions.length === 0)) {
-    tagText = 'v1 (черновик)';
-  } else if (isReturned) {
-    tagText = `v${vLen} (на доработке)`;
+  const rulerVerChip = document.getElementById('rulerCurrentVerChip');
+  if (rulerVerChip) {
+    rulerVerChip.textContent = `Рабочая версия: v${curVer}`;
   }
 
-  const versionTag = document.getElementById('headerVersionTag');
   const versionCount = document.getElementById('versionCountLabel');
-  const headerVersionCount = document.getElementById('headerVersionCount');
-
-  if (versionTag) versionTag.textContent = tagText;
-  if (versionCount) versionCount.textContent = `${vLen}`;
-  if (headerVersionCount) headerVersionCount.textContent = `${vLen}`;
+  if (versionCount) {
+    versionCount.textContent = `${pastVersionsCount}`;
+  }
 
   const inspectVerBadge = document.getElementById('inspectDocVersionBadge');
-  if (inspectVerBadge) inspectVerBadge.textContent = `v${vLen}`;
+  if (inspectVerBadge) {
+    inspectVerBadge.textContent = `v${curVer}`;
+  }
+}
+
+/**
+ * Как только автор начинает редактировать документ после возврата на доработку (status === 'returned'),
+ * версия документа автоматически увеличивается на +1 (v1 -> v2, v2 -> v3),
+ * а проверенная прошлая версия остается в «Истории изменений» со всеми ошибками.
+ */
+function triggerAuthorEditTransition() {
+  if (!currentDoc) return;
+  if (currentDoc.status === 'returned') {
+    const prevVer = currentDoc.current_version || 1;
+    const nextVer = prevVer + 1;
+    currentDoc.current_version = nextVer;
+    currentDoc.status = 'draft';
+    currentDoc.active_review_comments = [];
+
+    updateHeaderStatus(currentDoc.status, currentDoc.title_data?.topic);
+    updateDocumentVersionTags(currentDoc);
+    handleReviewFeedbackBanner(currentDoc);
+
+    // Убираем пометки с текущего рабочего листа, так как они уже сохранены в Истории изменений (v1)
+    document.querySelectorAll('.author-error-red-mark, .ann-highlight-red, .ann-highlight-yellow, .ann-strikethrough, .ann-underline, .ann-comment').forEach(mark => {
+      const parent = mark.parentNode;
+      if (parent) {
+        const badge = mark.querySelector('.ann-badge-note');
+        if (badge) badge.remove();
+        parent.replaceChild(document.createTextNode(mark.textContent), mark);
+        parent.normalize();
+      }
+    });
+
+    showToastNotification(`Начато редактирование: документу назначена версия v${nextVer}. Прошлая версия v${prevVer} с пометками сохранена в «Истории изменений».`);
+    saveCurrentDocument(false);
+  }
 }
 
 // ========================================================
@@ -422,12 +493,11 @@ function renderSections(sections) {
     box.innerHTML = `
       <div class="word-section-header">
         <input type="text" class="word-section-title-input" value="${escapeHtml(sec.title)}" 
-          placeholder="НАИМЕНОВАНИЕ РАЗДЕЛА" onchange="updateSectionTitle(${idx}, this.value)">
+          placeholder="НАИМЕНОВАНИЕ РАЗДЕЛА" oninput="triggerAuthorEditTransition()" onchange="updateSectionTitle(${idx}, this.value)">
         <button class="btn-icon" title="Удалить раздел" onclick="deleteSection(${idx})">✕</button>
       </div>
       <div class="word-section-body-text" contenteditable="true" 
-        data-section-index="${idx}"
-        onblur="updateSectionContent(${idx}, this.innerHTML)">
+        data-section-index="${idx}">
         ${formatContentWithWordFields(sec.content, idx)}
       </div>
     `;
@@ -436,6 +506,7 @@ function renderSections(sections) {
   });
 
   attachCaretTracking();
+  attachInlineFieldListeners();
 }
 
 function saveCurrentCaret() {
@@ -453,17 +524,122 @@ function saveCurrentCaret() {
   }
 }
 
+/**
+ * Сериализует DOM-элемент раздела обратно в текст с сохранением квадратных скобок [...]
+ * для всех голубых окошек .word-inline-field, чтобы окошки не пропадали на сайте.
+ */
+function serializeSectionElementToBracketText(el) {
+  if (!el) return '';
+  const clone = el.cloneNode(true);
+  clone.querySelectorAll('.ann-badge-note').forEach(b => b.remove());
+  clone.querySelectorAll('.word-inline-field').forEach(span => {
+    const rawVal = (span.innerText || span.textContent || '').replace(/[\r\n]+/g, ' ').trim();
+    const placeholder = span.getAttribute('data-placeholder') || 'ВВЕДИТЕ ДАННЫЕ';
+    const finalInside = rawVal || placeholder;
+    span.replaceWith(document.createTextNode(`[${finalInside}]`));
+  });
+  return clone.innerText;
+}
+
 function attachCaretTracking() {
   document.querySelectorAll('.word-section-body-text').forEach(el => {
     el.addEventListener('keyup', saveCurrentCaret);
     el.addEventListener('mouseup', saveCurrentCaret);
     el.addEventListener('focus', saveCurrentCaret);
     el.addEventListener('input', () => {
+      triggerAuthorEditTransition();
       saveCurrentCaret();
       const idx = parseInt(el.getAttribute('data-section-index'));
       if (!isNaN(idx) && currentDoc && currentDoc.sections[idx]) {
-        currentDoc.sections[idx].content = el.innerText;
+        currentDoc.sections[idx].content = serializeSectionElementToBracketText(el);
       }
+    });
+    el.addEventListener('blur', () => {
+      const idx = parseInt(el.getAttribute('data-section-index'));
+      if (!isNaN(idx) && currentDoc && currentDoc.sections[idx]) {
+        currentDoc.sections[idx].content = serializeSectionElementToBracketText(el);
+      }
+    });
+  });
+}
+
+function isPlaceholderFieldText(text) {
+  if (!text) return true;
+  const t = String(text).trim();
+  if (!t) return true;
+  const upper = t.toUpperCase();
+  if (
+    upper.startsWith('ВВЕДИТЕ ') ||
+    upper.startsWith('УКАЖИТЕ ') ||
+    upper.startsWith('ТОК ') ||
+    upper.startsWith('ТЕМПЕРАТУРА ') ||
+    upper.startsWith('ФИО ') ||
+    upper.startsWith('НОМЕР ') ||
+    upper.startsWith('ФАКТИЧЕСКАЯ ') ||
+    upper.startsWith('УЧЕТНАЯ ') ||
+    upper.startsWith('СУММА ') ||
+    upper === 'ВВЕДИТЕ ДАННЫЕ' ||
+    upper === 'ВВЕДИТЕ ЦЕЛЬ' ||
+    upper === 'ВВЕДИТЕ РЕЗУЛЬТАТЫ РАСЧЕТА'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function attachInlineFieldListeners() {
+  document.querySelectorAll('.word-inline-field').forEach(field => {
+    // При вводе или стирании пояснения в голубом окошке:
+    field.addEventListener('keydown', (e) => {
+      if (field.classList.contains('is-placeholder')) {
+        const placeholder = field.getAttribute('data-placeholder') || '';
+        const currentText = (field.innerText || '').trim();
+        // Если пользователь начинает печатать символ поверх исходного пояснения, сразу очищаем серое пояснение
+        if (currentText === placeholder && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          field.innerText = '';
+          field.classList.remove('is-placeholder', 'is-saved-gost');
+          field.classList.add('is-filled');
+        }
+      }
+    });
+
+    field.addEventListener('paste', (e) => {
+      e.preventDefault();
+      triggerAuthorEditTransition();
+      const pasted = (e.clipboardData || window.clipboardData).getData('text').replace(/[\r\n]+/g, ' ').trim();
+      if (field.classList.contains('is-placeholder')) {
+        field.innerText = pasted;
+      } else {
+        document.execCommand('insertText', false, pasted);
+      }
+      field.classList.remove('is-placeholder', 'is-saved-gost');
+      field.classList.add('is-filled');
+      syncAllSectionsFromDom();
+    });
+
+    field.addEventListener('input', () => {
+      triggerAuthorEditTransition();
+      const placeholder = field.getAttribute('data-placeholder') || '';
+      const currentText = (field.innerText || '').trim();
+      if (currentText !== placeholder && currentText !== '') {
+        field.classList.remove('is-placeholder', 'is-saved-gost');
+        field.classList.add('is-filled');
+      } else if (currentText === '') {
+        // Пока человек стер пояснения и пишет свой текст, шрифт черный обычный, окошко голубое
+        field.classList.remove('is-placeholder', 'is-saved-gost');
+        field.classList.add('is-filled');
+      }
+    });
+
+    field.addEventListener('blur', () => {
+      const placeholder = field.getAttribute('data-placeholder') || 'ВВЕДИТЕ ДАННЫЕ';
+      const currentText = (field.innerText || '').trim();
+      if (!currentText) {
+        field.innerText = placeholder;
+        field.classList.remove('is-filled', 'is-saved-gost');
+        field.classList.add('is-placeholder');
+      }
+      syncAllSectionsFromDom();
     });
   });
 }
@@ -472,40 +648,66 @@ function syncAllSectionsFromDom() {
   document.querySelectorAll('.word-section-body-text').forEach(el => {
     const idx = parseInt(el.getAttribute('data-section-index'));
     if (!isNaN(idx) && currentDoc && currentDoc.sections[idx]) {
-      currentDoc.sections[idx].content = el.innerText;
+      currentDoc.sections[idx].content = serializeSectionElementToBracketText(el);
     }
   });
+}
+
+function renderAnnotationTagHtml(targetEscaped, comm) {
+  const tool = comm.tool || 'highlight-red';
+  const note = escapeHtml(comm.note || 'Замечание проверяющего');
+  if (tool === 'highlight-yellow') {
+    return `<mark class="ann-highlight-yellow" title="${note}">${targetEscaped}</mark>`;
+  } else if (tool === 'strikethrough') {
+    return `<span class="ann-strikethrough" title="${note}">${targetEscaped}</span>`;
+  } else if (tool === 'underline') {
+    return `<span class="ann-underline" title="${note}">${targetEscaped}</span>`;
+  } else if (tool === 'comment') {
+    return `<span class="ann-comment" title="${note}">${targetEscaped}<span class="ann-badge-note">💬 ${note}</span></span>`;
+  }
+  return `<mark class="ann-highlight-red author-error-red-mark" title="${note}">${targetEscaped}</mark>`;
 }
 
 function formatContentWithWordFields(rawText, secIdx) {
   if (!rawText) return '';
   let formatted = escapeHtml(rawText);
 
-  // Если у документа статус 'returned' и есть замечания проверяющего - подсвечиваем их красным!
+  // Если у документа статус 'returned' и есть замечания проверяющего - отображаем все пометки!
   if (currentDoc && currentDoc.status === 'returned') {
     const comments = currentDoc.active_review_comments || 
       (currentDoc.reviews && currentDoc.reviews.length > 0 ? currentDoc.reviews[currentDoc.reviews.length - 1].comments : []);
 
     if (comments && comments.length > 0) {
       comments.forEach(c => {
-        if (c.target_text && formatted.includes(escapeHtml(c.target_text))) {
+        if ((c.section_index === undefined || c.section_index === secIdx) && c.target_text) {
           const escapedTarget = escapeHtml(c.target_text);
-          const replaceTag = `<mark class="author-error-red-mark" title="Замечание нормоконтроля: ${escapeHtml(c.note)}">${escapedTarget}</mark>`;
-          formatted = formatted.split(escapedTarget).join(replaceTag);
+          if (formatted.includes(escapedTarget)) {
+            const replaceTag = renderAnnotationTagHtml(escapedTarget, c);
+            formatted = formatted.split(escapedTarget).join(replaceTag);
+          }
         }
       });
     }
   }
 
-  // Подсвечиваем прозрачные поля ввода [ПОЛЕ]
+  // Окошки для ввода текста [ПОЛЕ]: голубой фон, серые отцентрированные пояснения или черный текст (и ГОСТ после сохранения)
+  const isSavedGost = Boolean(currentDoc && currentDoc._savedGostMode);
   formatted = formatted.replace(/\[(.*?)\]/g, (match, p1) => {
-    return `<span class="word-inline-field" contenteditable="true" title="Поле ввода">${p1}</span>`;
+    const trimmed = p1.trim();
+    const isPh = isPlaceholderFieldText(trimmed);
+    if (isPh) {
+      return `<span class="word-inline-field is-placeholder" contenteditable="true" data-placeholder="${trimmed}" title="Сотрите пояснение и введите свой текст">${trimmed}</span>`;
+    } else {
+      const gostClass = isSavedGost ? 'is-saved-gost' : '';
+      return `<span class="word-inline-field is-filled ${gostClass}" contenteditable="true" data-placeholder="ВВЕДИТЕ ДАННЫЕ" title="Введенное значение (голубое поле)">${trimmed}</span>`;
+    }
   });
 
   return formatted;
 }
 
 function updateSectionTitle(index, newTitle) {
+  triggerAuthorEditTransition();
   if (currentDoc && currentDoc.sections[index]) {
     currentDoc.sections[index].title = newTitle;
   }
@@ -513,14 +715,17 @@ function updateSectionTitle(index, newTitle) {
 
 function updateSectionContent(index, newHtml) {
   if (currentDoc && currentDoc.sections[index]) {
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = newHtml;
-    currentDoc.sections[index].content = tempDiv.innerText;
+    const el = document.querySelector(`.word-section-body-text[data-section-index="${index}"]`);
+    if (el) {
+      currentDoc.sections[index].content = serializeSectionElementToBracketText(el);
+    }
   }
 }
 
 function addNewSection() {
   if (!currentDoc) return;
+  triggerAuthorEditTransition();
+  syncAllSectionsFromDom();
   const newSec = {
     title: `${currentDoc.sections.length + 1}. Дополнительный расчетный раздел`,
     content: 'В данном разделе проведены расчеты согласно отраслевому стандарту. Полученные результаты: [ВВЕДИТЕ РЕЗУЛЬТАТЫ РАСЧЕТА].'
@@ -531,6 +736,8 @@ function addNewSection() {
 
 function deleteSection(index) {
   if (!confirm('Удалить данный раздел?')) return;
+  triggerAuthorEditTransition();
+  syncAllSectionsFromDom();
   currentDoc.sections.splice(index, 1);
   renderSections(currentDoc.sections);
 }
@@ -540,7 +747,7 @@ function renderBibliography(bibList) {
   listEl.innerHTML = '';
 
   if (bibList.length === 0) {
-    listEl.innerHTML = '<li style="color:#94a3b8; font-style:italic; list-style:none;">Источники автоматически появятся здесь при копировании текста из документов справа.</li>';
+    listEl.innerHTML = '<li style="color:#94a3b8; font-style:italic; list-style:none;">Источники автоматически появятся здесь при вставке текста из документов справа.</li>';
     return;
   }
 
@@ -556,6 +763,7 @@ function renderBibliography(bibList) {
 }
 
 function removeBibCitation(index) {
+  triggerAuthorEditTransition();
   currentDoc.bibliography.splice(index, 1);
   renderBibliography(currentDoc.bibliography);
 }
@@ -563,6 +771,7 @@ function removeBibCitation(index) {
 function promptAddCustomCitation() {
   const citation = prompt('Введите библиографическое описание источника по ГОСТ:');
   if (citation && citation.trim()) {
+    triggerAuthorEditTransition();
     currentDoc.bibliography.push(citation.trim());
     renderBibliography(currentDoc.bibliography);
   }
@@ -573,8 +782,8 @@ function handleReviewFeedbackBanner(doc) {
   if (doc.status === 'returned' && doc.reviews && doc.reviews.length > 0) {
     const latestReview = doc.reviews[doc.reviews.length - 1];
     banner.style.display = 'block';
-    const revVer = latestReview.version_reviewed || (doc.versions && doc.versions.length) || 1;
-    document.getElementById('bannerReviewerStamp').textContent = `Проверил: ${latestReview.reviewer_name} (по версии v${revVer})`;
+    const revVer = latestReview.version_reviewed || doc.current_version || 1;
+    document.getElementById('bannerReviewerStamp').textContent = `Проверил: ${latestReview.reviewer_name} (Версия v${revVer})`;
     document.getElementById('bannerFeedbackText').textContent = latestReview.general_feedback || 'Требуются исправления перед повторной отправкой.';
 
     const commentsList = document.getElementById('bannerCommentsList');
@@ -587,9 +796,9 @@ function handleReviewFeedbackBanner(doc) {
       const chip = document.createElement('div');
       chip.className = 'feedback-comment-chip';
       chip.style.cursor = 'pointer';
-      chip.title = 'Нажмите, чтобы перейти к ошибке в тексте отчета';
+      chip.title = 'Нажмите, чтобы перейти к пометке в тексте отчета';
       chip.onclick = () => scrollToErrorSection(c.target_text);
-      chip.innerHTML = `<b>Ошибка ${idx + 1}:</b> «${escapeHtml(c.target_text)}» — <i style="color:#dc2626;">${escapeHtml(c.note)}</i> <span style="font-size:9px; color:#2563eb; margin-left:4px;">(найти в тексте)</span>`;
+      chip.innerHTML = `<b>Пометка ${idx + 1}:</b> «${escapeHtml(c.target_text)}» — <i style="color:#dc2626;">${escapeHtml(c.note)}</i> <span style="font-size:9px; color:#2563eb; margin-left:4px;">(найти в тексте)</span>`;
       commentsList.appendChild(chip);
     });
   } else {
@@ -605,15 +814,23 @@ function scrollToErrorSection(targetText) {
       block.scrollIntoView({ behavior: 'smooth', block: 'center' });
       block.style.boxShadow = '0 0 0 3px #ef4444';
       setTimeout(() => { block.style.boxShadow = ''; }, 2200);
-      showToastNotification(`Переход к разделу с ошибкой: «${targetText.substring(0, 30)}...»`);
+      showToastNotification(`Переход к фрагменту: «${targetText.substring(0, 30)}...»`);
       break;
     }
   }
 }
 
-// Сохранение текущего документа
+// Сохранение текущего документа: форматирует введенный текст в голубых полях по ГОСТу (Times New Roman 14pt), оставляя голубой фон на сайте
 async function saveCurrentDocument(showToast = false) {
+  syncAllSectionsFromDom();
   collectCurrentDocData();
+  currentDoc._savedGostMode = true;
+
+  // Переводим все заполненные голубые окошки в шрифт по стандарту ГОСТ (фон на сайте остается голубым!)
+  document.querySelectorAll('.word-inline-field.is-filled').forEach(field => {
+    field.classList.add('is-saved-gost');
+  });
+
   try {
     const res = await fetch('/api/documents', {
       method: 'POST',
@@ -623,13 +840,16 @@ async function saveCurrentDocument(showToast = false) {
     const data = await res.json();
     if (data.success) {
       currentDoc = data.document;
+      currentDoc._savedGostMode = true;
       updateHeaderStatus(currentDoc.status, currentDoc.title_data.topic);
+      updateDocumentVersionTags(currentDoc);
       await loadUserDocuments();
-      if (showToast) showToastNotification('Документ сохранен в базе данных');
+      if (showToast) {
+        showToastNotification('Черновик сохранен: введенный в голубые окошки текст оформлен шрифтом по ГОСТу');
+      }
     }
   } catch (err) {
     console.error('Ошибка сохранения документа:', err);
-    alert('Не удалось сохранить документ.');
   }
 }
 
@@ -648,12 +868,12 @@ function collectCurrentDocData() {
 }
 
 // ========================================================
-// 3.1. ОТПРАВКА НА ПРОВЕРКУ С АВТОМАТИЧЕСКИМ ПОВЫШЕНИЕМ ВЕРСИИ
+// 3.1. ОТПРАВКА НА ПРОВЕРКУ (ВЕРСИЯ НЕ МЕНЯЕТСЯ ПРИ ОТПРАВКЕ)
 // ========================================================
 
 function openSubmitModal() {
   if (!currentDoc || !currentDoc.id) {
-    alert('Сначала выберите или сохраните документ.');
+    showToastNotification('Сначала выберите или сохраните документ.');
     return;
   }
   const modal = document.getElementById('submitModal');
@@ -661,16 +881,15 @@ function openSubmitModal() {
   const badge = document.getElementById('submitNextVerBadge');
   const text = document.getElementById('submitNextVerText');
   
-  const currentVersionsCount = (currentDoc.versions ? currentDoc.versions.length : 0);
-  const nextVer = currentVersionsCount + 1;
+  const curVer = currentDoc.current_version || 1;
 
-  if (badge) badge.textContent = `v${nextVer}`;
-  if (text) text.textContent = `Версия v${nextVer}`;
+  if (badge) badge.textContent = `v${curVer}`;
+  if (text) text.textContent = `v${curVer}`;
 
-  if (nextVer === 1) {
-    input.value = 'Версия 1: Первоначальная редакция отчета';
+  if (curVer === 1) {
+    input.value = 'Версия v1: Первоначальная отправка отчета на проверку';
   } else {
-    input.value = `Версия ${nextVer}: Исправления по замечаниям нормоконтроля`;
+    input.value = `Версия v${curVer}: Доработанная редакция после исправления замечаний`;
   }
 
   modal.style.display = 'flex';
@@ -699,49 +918,53 @@ async function submitDocumentWithChangelog(changelog = '') {
     const data = await res.json();
     if (data.success) {
       currentDoc = data.document;
-      const assignedVer = currentDoc.current_version || (currentDoc.versions ? currentDoc.versions.length : 1);
+      const curVer = currentDoc.current_version || 1;
       updateHeaderStatus(currentDoc.status, currentDoc.title_data?.topic);
       updateDocumentVersionTags(currentDoc);
-      handleReviewFeedbackBanner(currentDoc); // Баннер скроется
+      handleReviewFeedbackBanner(currentDoc);
       await loadUserDocuments();
 
-      showToastNotification(`Отчет успешно отправлен на нормоконтроль как Версия v${assignedVer}`);
-      alert(`Отчет по специальности «${currentDoc.author_specialty}» успешно передан на проверку нормоконтролеру.\n\nДокументу автоматически присвоена Версия v${assignedVer}.\nПредыдущие версии сохранены в «Истории изменений».`);
+      showToastNotification(`Отчет (версия v${curVer}) передан проверяющему на нормоконтроль`);
     }
   } catch (err) {
     console.error('Ошибка отправки отчета:', err);
-    alert('Не удалось отправить отчет на проверку.');
   }
 }
 
-// Для совместимости со старыми вызовами
 async function submitDocumentForReview() {
   openSubmitModal();
 }
 
-function exportDocument(format) {
+async function exportDocument(format) {
   if (!currentDoc || !currentDoc.id) {
-    alert('Сначала сохраните документ.');
+    showToastNotification('Сначала сохраните документ.');
     return;
   }
-  window.open(`/api/documents/${currentDoc.id}/export/${format}`, '_blank');
+  await saveCurrentDocument(false);
+  window.location.href = `/api/documents/${currentDoc.id}/export/${format}`;
 }
 
 
 // ========================================================
-// 3.2. ИСТОРИЯ ИЗМЕНЕНИЙ (ВЕРСИОНИРОВАНИЕ И ОТКАТ)
+// 3.2. ИСТОРИЯ ИЗМЕНЕНИЙ (ПАМЯТЬ ПРОШЛЫХ ВЕРСИЙ И ОШИБОК)
 // ========================================================
+
+let cachedPastVersions = [];
 
 function openVersionHistoryModal() {
   if (!currentDoc || !currentDoc.id) {
-    alert('Сначала выберите или создайте документ.');
+    showToastNotification('Сначала выберите или создайте документ.');
     return;
   }
   const modal = document.getElementById('versionHistoryModal');
   const titleEl = document.getElementById('versionHistoryDocTitle');
+  const curVer = currentDoc.current_version || 1;
   if (titleEl) {
-    titleEl.textContent = `«${currentDoc.title_data?.topic || 'Без темы'}» (${currentDoc.author_specialty || ''})`;
+    titleEl.textContent = `«${currentDoc.title_data?.topic || 'Без темы'}» — текущая рабочая версия: v${curVer}`;
   }
+  const viewer = document.getElementById('pastVersionSheetViewer');
+  if (viewer) viewer.style.display = 'none';
+
   modal.style.display = 'flex';
   loadVersionTimeline();
 }
@@ -753,12 +976,13 @@ function closeVersionHistoryModal() {
 async function loadVersionTimeline() {
   const container = document.getElementById('versionTimelineList');
   if (!container) return;
-  container.innerHTML = '<div style="font-size:12px; color:#64748b; padding:16px; text-align:center;">Загрузка истории версий...</div>';
+  container.innerHTML = '<div style="font-size:12px; color:#64748b; padding:16px; text-align:center;">Загрузка прошлых версий...</div>';
 
   try {
     const res = await fetch(`/api/documents/${currentDoc.id}/versions`);
     const versions = await res.json();
-    renderVersionTimeline(versions);
+    cachedPastVersions = versions || [];
+    renderVersionTimeline(cachedPastVersions);
   } catch (err) {
     container.innerHTML = '<div style="color:#ef4444; font-size:12px; padding:16px; text-align:center;">Не удалось загрузить историю изменений.</div>';
   }
@@ -769,82 +993,128 @@ function renderVersionTimeline(versions) {
   if (!container) return;
   container.innerHTML = '';
 
+  const curVer = currentDoc.current_version || 1;
+
   if (!versions || versions.length === 0) {
     container.innerHTML = `
-      <div style="font-size:12px; color:#64748b; padding:20px; text-align:center;">
-        Для данного документа пока нет зафиксированных версий.<br>
-        При каждой отправке отчета проверяющему здесь будет создаваться снимок состояния (v1, v2...).
+      <div style="font-size:12px; color:#475569; padding:24px; text-align:center; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:6px;">
+        <b>Вы сейчас работаете над версией v${curVer}.</b><br>
+        Прошлых версий с ошибками пока нет. Когда проверяющий проверит версию v${curVer} и вернет ее на доработку, она автоматически сохранится здесь со всеми его пометками (например: при работе над v2 здесь хранится v1; при работе над v3 — хранятся v1 и v2).
       </div>`;
     return;
   }
 
-  // Сортируем от новых к старым
-  const reversed = [...versions].reverse();
-  const currentVerNum = (currentDoc.versions && currentDoc.versions.length) || 1;
+  // Сортируем по порядку номеров версий (v1, v2...)
+  const sorted = [...versions].sort((a, b) => a.version_number - b.version_number);
 
-  reversed.forEach(v => {
-    const isCurrent = v.version_number === currentVerNum;
+  sorted.forEach(v => {
     const card = document.createElement('div');
-    card.className = `version-timeline-card ${isCurrent ? 'version-card-active' : ''}`;
+    card.className = 'version-timeline-card';
+    card.id = `version-card-${v.version_number}`;
+    card.onclick = () => openPastVersionViewer(v.version_number);
 
-    const dateFormatted = new Date(v.created_at).toLocaleString('ru-RU', {
+    const dateFormatted = new Date(v.reviewed_at || v.created_at).toLocaleString('ru-RU', {
       day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
     });
-    const sectionsCount = (v.sections || []).length;
-    const bibCount = (v.bibliography || []).length;
+    const commentsCount = (v.review_comments || []).length;
 
     card.innerHTML = `
       <div class="version-card-header">
         <div class="version-tag-row">
-          <span class="version-tag">Версия v${v.version_number}</span>
-          ${isCurrent ? '<span class="version-badge-current">Текущее состояние</span>' : ''}
-          <span class="version-date">${dateFormatted}</span>
+          <span class="version-tag">Прошлая версия v${v.version_number}</span>
+          <span class="version-badge-errors">Пометок проверяющего: ${commentsCount}</span>
+          <span class="version-date">Проверено: ${dateFormatted}</span>
         </div>
-        <div class="version-actions-btns">
-          <button class="btn-v-export" onclick="exportVersionDoc(${v.version_number}, 'docx')" title="Скачать DOCX этой версии">DOCX</button>
-          <button class="btn-v-export" onclick="exportVersionDoc(${v.version_number}, 'txt')" title="Скачать TXT этой версии">TXT</button>
-          ${!isCurrent ? `<button class="btn-v-restore" onclick="restoreVersion(${v.version_number})">Откатить к v${v.version_number}</button>` : ''}
+        <div class="version-actions-btns" onclick="event.stopPropagation();">
+          <button class="btn-v-view" onclick="openPastVersionViewer(${v.version_number})">Открыть лист v${v.version_number} с ошибками</button>
+          <button class="btn-v-export" onclick="exportVersionDoc(${v.version_number}, 'docx')" title="Скачать DOCX версии v${v.version_number}">DOCX</button>
+          <button class="btn-v-export" onclick="exportVersionDoc(${v.version_number}, 'txt')" title="Скачать TXT версии v${v.version_number}">TXT</button>
         </div>
       </div>
-      <div class="version-changelog">${escapeHtml(v.changelog || 'Без описания')}</div>
-      <div class="version-meta-info">
-        <span>Разделов: ${sectionsCount}</span>
-        <span>•</span>
-        <span>Источников ГОСТ: ${bibCount}</span>
-        <span>•</span>
-        <span>Автор: ${escapeHtml(v.author_name || 'Козлов В.А.')}</span>
+      <div class="version-changelog">${escapeHtml(v.general_feedback || v.changelog || 'Возвращено на доработку')}</div>
+      <div class="version-meta">
+        Проверяющий: <b>${escapeHtml(v.reviewer_name || 'Профессор Смирнов А.В.')}</b> • Нажмите на карточку, чтобы просмотреть лист версии v${v.version_number} со всеми выделениями и замечаниями
       </div>
     `;
     container.appendChild(card);
   });
+
+  // Автоматически открываем последнюю сохраненную прошлую версию для удобства
+  if (sorted.length > 0) {
+    openPastVersionViewer(sorted[sorted.length - 1].version_number);
+  }
+}
+
+function openPastVersionViewer(versionNum) {
+  const v = cachedPastVersions.find(item => item.version_number === versionNum);
+  const viewer = document.getElementById('pastVersionSheetViewer');
+  if (!v || !viewer) return;
+
+  document.querySelectorAll('.version-timeline-card').forEach(c => c.classList.remove('version-card-active'));
+  const activeCard = document.getElementById(`version-card-${versionNum}`);
+  if (activeCard) activeCard.classList.add('version-card-active');
+
+  const comments = v.review_comments || [];
+  let sectionsHtml = '';
+
+  (v.sections || []).forEach((sec, idx) => {
+    let contentHtml = escapeHtml(sec.content || '');
+    comments.forEach(c => {
+      if ((c.section_index === undefined || c.section_index === idx) && c.target_text) {
+        const escapedTarget = escapeHtml(c.target_text);
+        if (contentHtml.includes(escapedTarget)) {
+          contentHtml = contentHtml.split(escapedTarget).join(renderAnnotationTagHtml(escapedTarget, c));
+        }
+      }
+    });
+
+    // Очищаем скобки для наглядного чтения листа
+    contentHtml = contentHtml.replace(/\[(.*?)\]/g, '$1');
+
+    sectionsHtml += `
+      <div class="inspect-section-block">
+        <span class="inspect-section-title-tag">${idx + 1}. ${escapeHtml((sec.title || '').toUpperCase())}</span>
+        <div class="inspect-section-text">${contentHtml}</div>
+      </div>
+    `;
+  });
+
+  let commentsSummaryHtml = '';
+  if (comments.length > 0) {
+    commentsSummaryHtml = `
+      <div style="margin-top:16px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:12px 16px;">
+        <div style="font-size:11px; font-weight:700; color:#991b1b; margin-bottom:6px;">Список замечаний проверяющего в версии v${v.version_number}:</div>
+        <ul style="padding-left:18px; margin:0; font-size:11px; color:#7f1d1d;">
+          ${comments.map(c => `<li style="margin-bottom:4px;"><b>«${escapeHtml(c.target_text)}»</b> — ${escapeHtml(c.note)}</li>`).join('')}
+        </ul>
+      </div>
+    `;
+  }
+
+  viewer.style.display = 'block';
+  viewer.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <div style="font-size:12px; font-weight:700; color:#1e40af;">
+        Просмотр архивного листа: Версия v${v.version_number} (со всеми пометками проверяющего)
+      </div>
+      <div style="font-size:11px; color:#475569;">
+        Заключение: <b>${escapeHtml(v.general_feedback || 'На доработку')}</b>
+      </div>
+    </div>
+    <div class="past-version-sheet-paper">
+      <div style="text-align:center; border-bottom:1px solid #e2e8f0; padding-bottom:12px; margin-bottom:16px;">
+        <div style="font-weight:bold; font-size:12pt;">${escapeHtml(v.title_data?.doc_type || 'ТЕХНИЧЕСКИЙ ОТЧЕТ')} (Версия v${v.version_number})</div>
+        <div style="font-weight:bold; font-size:13pt; margin-top:4px;">Тема: «${escapeHtml(v.title_data?.topic || 'Без темы')}»</div>
+      </div>
+      ${sectionsHtml}
+      ${commentsSummaryHtml}
+    </div>
+  `;
 }
 
 function exportVersionDoc(versionNum, format) {
   if (!currentDoc || !currentDoc.id) return;
-  window.open(`/api/documents/${currentDoc.id}/versions/${versionNum}/export/${format}`, '_blank');
-}
-
-async function restoreVersion(versionNum) {
-  if (!confirm(`Вы действительно хотите восстановить документ до состояния Версии v${versionNum}?\nТекущий текст и библиография будут заменены состоянием из v${versionNum}.`)) return;
-
-  try {
-    const res = await fetch(`/api/documents/${currentDoc.id}/versions/${versionNum}/restore`, {
-      method: 'POST'
-    });
-    const data = await res.json();
-    if (data.success) {
-      currentDoc = data.document;
-      loadDocumentIntoEditor(currentDoc);
-      await loadUserDocuments();
-      closeVersionHistoryModal();
-      showToastNotification(`Документ успешно восстановлен из Версии v${versionNum}`);
-    } else {
-      alert('Не удалось восстановить версию.');
-    }
-  } catch (err) {
-    console.error('Ошибка восстановления:', err);
-    alert('Ошибка соединения при восстановлении версии.');
-  }
+  window.location.href = `/api/documents/${currentDoc.id}/versions/${versionNum}/export/${format}`;
 }
 
 
@@ -1271,37 +1541,40 @@ function renderReviewerQueue(docs) {
   const pendingDocs = docs.filter(d => d.status === 'review');
   updateReviewerQueueCount();
 
+  const inspectCard = document.getElementById('inspectDocumentCard');
+  const wordRibbon = document.getElementById('reviewerWordRibbon');
+
   if (pendingDocs.length === 0) {
     container.innerHTML = `
-      <div class="queue-empty-state">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-          <polyline points="14 2 14 8 20 8"></polyline>
-          <polyline points="9 15 12 18 15 15"></polyline>
-        </svg>
+      <div class="queue-empty-state" style="width:100%; padding:14px;">
         <h4>Очередь нормоконтроля пуста</h4>
-        <p>Отчеты появятся здесь только после того, как автор нажмет «Отправить на проверку».</p>
+        <p>Отчеты появятся здесь после того, как автор нажмет «Отправить на проверку».</p>
       </div>`;
-    const inspectCard = document.getElementById('inspectDocumentCard');
     if (inspectCard) inspectCard.style.display = 'none';
+    if (wordRibbon) wordRibbon.style.display = 'none';
     return;
   }
 
-  const inspectCard = document.getElementById('inspectDocumentCard');
-  if (inspectCard) inspectCard.style.display = 'block';
+  if (inspectCard) inspectCard.style.display = 'flex';
+  if (wordRibbon) wordRibbon.style.display = 'flex';
 
   pendingDocs.forEach(doc => {
     const card = document.createElement('div');
     const isActive = activeReviewDocId === doc.id;
     card.className = `queue-file-card ${isActive ? 'active' : ''}`;
-    card.onclick = () => inspectDocumentForReview(doc);
+    card.onclick = () => {
+      activeReviewDocId = doc.id;
+      renderReviewerQueue(docs);
+      inspectDocumentForReview(doc);
+    };
 
     const specClass = getSpecialtyBadgeClass(doc.specialty_id);
+    const docVer = doc.current_version || 1;
 
     card.innerHTML = `
       <div class="queue-file-top">
         <span class="history-item-specialty-badge ${specClass}">${escapeHtml(doc.author_specialty || 'Специалист')}</span>
-        <span class="status-badge status-review">На рассмотрении</span>
+        <span class="status-badge status-review">Версия v${docVer}</span>
       </div>
       <div class="queue-file-topic">${escapeHtml(doc.title_data?.topic || 'Без темы')}</div>
       <div class="queue-file-meta">
@@ -1325,16 +1598,16 @@ function inspectDocumentForReview(doc) {
   stagedReviewComments = [];
   renderStagedReviewComments();
 
-  const vCount = (doc.versions && doc.versions.length) || 1;
+  const vCount = doc.current_version || 1;
   document.getElementById('inspectDocTitle').textContent = doc.title_data?.topic || 'Без темы';
   document.getElementById('inspectDocSpecialtyBadge').textContent = `${doc.author_specialty || 'Специалист'}`;
-  document.getElementById('inspectDocMeta').textContent = `Автор: ${doc.author_name || 'Козлов В.А.'} | Статус: НА РАССМОТРЕНИИ (Версия v${vCount})`;
+  document.getElementById('inspectDocMeta').textContent = `Автор: ${doc.author_name || 'Козлов В.А.'} | Поступила на проверку: Версия v${vCount}`;
   
   const vBadge = document.getElementById('inspectDocVersionBadge');
   if (vBadge) vBadge.textContent = `v${vCount}`;
 
   const vHint = document.getElementById('verdictVersionHint');
-  if (vHint) vHint.textContent = `Ревизия v${vCount}`;
+  if (vHint) vHint.textContent = `Проверка v${vCount}`;
 
   renderInspectDocBody(doc);
   updateInspectorErrorCount();
@@ -1349,7 +1622,7 @@ function renderInspectDocBody(doc) {
   titleBox.className = 'inspect-section-block';
   titleBox.innerHTML = `
     <span class="inspect-section-title-tag">ТИТУЛЬНЫЙ ЛИСТ</span>
-    <div class="inspect-section-text" style="font-size:11pt; color:#475569; background:#f8fafc; padding:8px 12px; border-radius:4px;">
+    <div class="inspect-section-text" style="font-size:12pt; color:#334155; background:#f8fafc; padding:12px 16px; border-radius:4px; text-indent:0;">
       <b>Организация:</b> ${escapeHtml(doc.title_data?.org || 'ВИТИ НИЯУ МИФИ')}<br>
       <b>Вид документа:</b> ${escapeHtml(doc.title_data?.doc_type || 'ТЕХНИЧЕСКИЙ ОТЧЕТ')}<br>
       <b>Тема работы:</b> ${escapeHtml(doc.title_data?.topic || 'Без темы')}<br>
@@ -1359,27 +1632,28 @@ function renderInspectDocBody(doc) {
   `;
   container.appendChild(titleBox);
 
-  // Разделы отчета с поддержкой выделения ошибок
+  // Разделы отчета с поддержкой инструментов Word (выделение цветом, зачеркивание, подчеркивание, комментарий)
   (doc.sections || []).forEach((sec, idx) => {
     const secBox = document.createElement('div');
     secBox.className = 'inspect-section-block';
     secBox.setAttribute('data-sec-idx', idx);
 
-    let secContentHtml = escapeHtml(sec.content || '');
+    // Очищаем квадратные скобки полей ввода для чистого отображения листа проверяющему
+    const cleanRaw = (sec.content || '').replace(/\[(.*?)\]/g, '$1');
+    let secContentHtml = escapeHtml(cleanRaw);
 
-    // Подсвечиваем все уже добавленные замечания к этому разделу красным
-    stagedReviewComments.forEach((comm, cIdx) => {
+    stagedReviewComments.forEach(comm => {
       if (comm.section_index === idx && comm.target_text) {
         const escapedTarget = escapeHtml(comm.target_text);
         if (secContentHtml.includes(escapedTarget)) {
-          const redTag = `<mark class="reviewer-highlight-red" data-comment-idx="${cIdx}" title="Замечание: ${escapeHtml(comm.note)}">${escapedTarget}</mark>`;
-          secContentHtml = secContentHtml.split(escapedTarget).join(redTag);
+          const markHtml = renderAnnotationTagHtml(escapedTarget, comm);
+          secContentHtml = secContentHtml.split(escapedTarget).join(markHtml);
         }
       }
     });
 
     secBox.innerHTML = `
-      <span class="inspect-section-title-tag">РАЗДЕЛ ${idx + 1}. ${escapeHtml(sec.title.toUpperCase())}</span>
+      <span class="inspect-section-title-tag">${idx + 1}. ${escapeHtml(sec.title.toUpperCase())}</span>
       <div class="inspect-section-text" data-sec-idx="${idx}" id="inspectSecText_${idx}">${secContentHtml}</div>
     `;
     container.appendChild(secBox);
@@ -1389,14 +1663,14 @@ function renderInspectDocBody(doc) {
   if (doc.bibliography && doc.bibliography.length > 0) {
     const bibBox = document.createElement('div');
     bibBox.className = 'inspect-section-block';
-    let bibHtml = '<ol style="padding-left:18px; margin:4px 0; font-size:11pt; color:#334155;">';
+    let bibHtml = '<ol style="padding-left:22px; margin:4px 0; font-size:13pt; color:#0f172a; text-indent:0;">';
     doc.bibliography.forEach(b => {
-      bibHtml += `<li style="margin-bottom:2px;">${escapeHtml(b)}</li>`;
+      bibHtml += `<li style="margin-bottom:4px;">${escapeHtml(b)}</li>`;
     });
     bibHtml += '</ol>';
     bibBox.innerHTML = `
-      <span class="inspect-section-title-tag">СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ (ГОСТ Р 7.0.5)</span>
-      <div class="inspect-section-text">${bibHtml}</div>
+      <span class="inspect-section-title-tag">СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ</span>
+      <div class="inspect-section-text" style="text-indent:0;">${bibHtml}</div>
     `;
     container.appendChild(bibBox);
   }
@@ -1405,24 +1679,31 @@ function renderInspectDocBody(doc) {
 function updateInspectorErrorCount() {
   const pill = document.getElementById('errorCounterBadge');
   if (pill) {
-    pill.textContent = `Ошибок выделено: ${stagedReviewComments.length}`;
+    pill.textContent = `Пометок: ${stagedReviewComments.length}`;
   }
 }
 
-function markSelectedTextAsError() {
+/**
+ * Применение инструмента Word проверяющего к выделенному тексту:
+ * - 'highlight-red': Выделение красным маркером
+ * - 'highlight-yellow': Выделение желтым маркером
+ * - 'strikethrough': Зачеркивание
+ * - 'underline': Подчеркивание
+ * - 'comment': Текстовый комментарий к выделенному фрагменту
+ */
+function applyReviewerAnnotation(toolType) {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed) {
-    alert('Сначала выделите фрагмент текста мышкой в окне отчета, чтобы пометить ошибку красным цветом.');
+    showToastNotification('Сначала выделите фрагмент текста мышкой на листе отчета ниже.');
     return;
   }
 
   const selectedText = sel.toString().trim();
   if (!selectedText) {
-    alert('Выделенный фрагмент пуст.');
+    showToastNotification('Выделенный фрагмент пуст.');
     return;
   }
 
-  // Определяем индекс раздела
   let secIdx = 0;
   let anchorEl = sel.anchorNode;
   if (anchorEl) {
@@ -1434,16 +1715,32 @@ function markSelectedTextAsError() {
     }
   }
 
-  const note = prompt(`Укажите суть замечания к фрагменту:\n«${selectedText.substring(0, 80)}${selectedText.length > 80 ? '...' : ''}»`, 'Несоответствие нормам / ошибка в параметрах или расчетах');
-  if (note === null) return; // Нажата отмена
+  const toolDefaultNotes = {
+    'highlight-red': 'Выделена ошибка (красный маркер)',
+    'highlight-yellow': 'Требует уточнения (желтый маркер)',
+    'strikethrough': 'Зачеркнуто проверяющим (удалить/исправить)',
+    'underline': 'Подчеркнуто проверяющим (обратить внимание)'
+  };
+
+  let note = toolDefaultNotes[toolType] || 'Замечание проверяющего';
+  if (toolType === 'comment') {
+    const entered = prompt(
+      `Введите комментарий проверяющего к фрагменту:\n«${selectedText.substring(0, 80)}${selectedText.length > 80 ? '...' : ''}»`,
+      'Несоответствие нормам ГОСТ / уточнить параметр'
+    );
+    if (entered === null) return;
+    note = entered.trim() || 'Замечание проверяющего';
+  }
 
   stagedReviewComments.push({
     section_index: secIdx,
     target_text: selectedText,
-    note: note.trim() || 'Требуется исправление по ГОСТ',
-    severity: 'error'
+    tool: toolType,
+    note,
+    severity: toolType === 'highlight-red' || toolType === 'strikethrough' ? 'error' : 'warning'
   });
 
+  sel.removeAllRanges();
   renderStagedReviewComments();
   updateInspectorErrorCount();
 
@@ -1451,12 +1748,16 @@ function markSelectedTextAsError() {
     renderInspectDocBody(currentInspectedDoc);
   }
 
-  showToastNotification(`Ошибка «${selectedText.substring(0, 25)}...» выделена красным цветом`);
+  showToastNotification(`Добавлена пометка к фрагменту «${selectedText.substring(0, 25)}...»`);
+}
+
+function markSelectedTextAsError() {
+  applyReviewerAnnotation('highlight-red');
 }
 
 function clearSelectedErrorHighlight() {
   if (stagedReviewComments.length === 0) {
-    alert('Нет выделенных замечаний для отмены.');
+    showToastNotification('Нет добавленных пометок для отмены.');
     return;
   }
   const removed = stagedReviewComments.pop();
@@ -1465,7 +1766,7 @@ function clearSelectedErrorHighlight() {
   if (currentInspectedDoc) {
     renderInspectDocBody(currentInspectedDoc);
   }
-  showToastNotification(`Замечание к «${(removed.target_text || '').substring(0, 20)}...» снято`);
+  showToastNotification(`Пометка к «${(removed.target_text || '').substring(0, 20)}...» отменена`);
 }
 
 function renderStagedReviewComments() {
@@ -1474,16 +1775,25 @@ function renderStagedReviewComments() {
   listEl.innerHTML = '';
 
   if (stagedReviewComments.length === 0) {
-    listEl.innerHTML = '<li style="color:#94a3b8; font-size:10px; font-style:italic;">Замечания не выделены. Для выделения выделите текст в отчете и нажмите «Выделить ошибку (красным)».</li>';
+    listEl.innerHTML = '<li style="color:#94a3b8; font-size:11px; font-style:italic;">Пометки пока не добавлены. Выделите текст на листе выше и воспользуйтесь верхней панелью инструментов Word.</li>';
     return;
   }
+
+  const toolBadgeNames = {
+    'highlight-red': 'Красный маркер',
+    'highlight-yellow': 'Желтый маркер',
+    'strikethrough': 'Зачеркивание',
+    'underline': 'Подчеркивание',
+    'comment': 'Комментарий'
+  };
 
   stagedReviewComments.forEach((c, idx) => {
     const li = document.createElement('li');
     li.className = 'staged-comment-item';
+    const label = toolBadgeNames[c.tool] || 'Пометка';
     li.innerHTML = `
-      <span><b style="color:#b91c1c;">[Ошибка ${idx + 1}]</b> «${escapeHtml(c.target_text)}» — <i>${escapeHtml(c.note)}</i></span>
-      <button style="border:none; background:none; cursor:pointer; color:#ef4444; font-weight:bold;" title="Удалить замечание" onclick="stagedReviewComments.splice(${idx},1); renderStagedReviewComments(); updateInspectorErrorCount(); if(currentInspectedDoc) renderInspectDocBody(currentInspectedDoc);">✕</button>
+      <span><b style="color:#1e40af;">[${label}]</b> «${escapeHtml(c.target_text)}» — <i>${escapeHtml(c.note)}</i></span>
+      <button style="border:none; background:none; cursor:pointer; color:#ef4444; font-weight:bold;" title="Удалить пометку" onclick="stagedReviewComments.splice(${idx},1); renderStagedReviewComments(); updateInspectorErrorCount(); if(currentInspectedDoc) renderInspectDocBody(currentInspectedDoc);">✕</button>
     `;
     listEl.appendChild(li);
   });
@@ -1494,9 +1804,11 @@ async function submitReviewVerdict(verdictStatus) {
 
   const generalFeedback = document.getElementById('reviewerFeedbackInput').value.trim();
   if (verdictStatus === 'returned' && stagedReviewComments.length === 0 && !generalFeedback) {
-    alert('При отправке на доработку выделите хотя бы одну ошибку в тексте или укажите общее замечание.');
+    showToastNotification('Добавьте хотя бы одну пометку на листе или напишите общее заключение перед возвратом на доработку.');
     return;
   }
+
+  const reviewedVer = (currentInspectedDoc && currentInspectedDoc.current_version) || 1;
 
   try {
     const res = await fetch(`/api/documents/${activeReviewDocId}/review`, {
@@ -1505,15 +1817,17 @@ async function submitReviewVerdict(verdictStatus) {
       body: JSON.stringify({
         reviewer_name: currentUser.reviewer,
         status: verdictStatus,
-        general_feedback: generalFeedback || (verdictStatus === 'approved' ? 'Отчет проверен и утвержден нормоконтролем.' : 'Обнаружены несоответствия ГОСТ или ошибки в расчетах. Требуются исправления.'),
+        general_feedback: generalFeedback || (verdictStatus === 'approved' ? 'Отчет проверен и утвержден нормоконтролем.' : 'Обнаружены замечания. Требуется доработка.'),
         comments: stagedReviewComments
       })
     });
     const data = await res.json();
     if (data.success) {
-      alert(verdictStatus === 'returned' 
-        ? `Отчет отправлен автору на доработку!\nВыделено ошибок в тексте: ${stagedReviewComments.length}.\nАвтор увидит эти замечания красным цветом и подготовит следующую версию (v2).` 
-        : 'Отчет успешно утвержден и принят нормоконтролем!');
+      showToastNotification(
+        verdictStatus === 'returned'
+          ? `Версия v${reviewedVer} возвращена на доработку и сохранена в Истории изменений со всеми пометками!`
+          : `Отчет (v${reviewedVer}) успешно утвержден нормоконтролем!`
+      );
       document.getElementById('reviewerFeedbackInput').value = '';
       stagedReviewComments = [];
       renderStagedReviewComments();
@@ -1523,13 +1837,12 @@ async function submitReviewVerdict(verdictStatus) {
     }
   } catch (err) {
     console.error('Ошибка отправки вердикта:', err);
-    alert('Не удалось отправить вердикт нормоконтролера.');
   }
 }
 
 function exportCurrentInspectedDoc(format) {
   if (activeReviewDocId) {
-    window.open(`/api/documents/${activeReviewDocId}/export/${format}`, '_blank');
+    window.location.href = `/api/documents/${activeReviewDocId}/export/${format}`;
   }
 }
 
@@ -1560,161 +1873,7 @@ async function handleUploadDocSubmit(event) {
       await loadNormDocs(spec ? spec.name : null);
     }
   } catch (err) {
-    alert('Не удалось загрузить документ.');
-  }
-}
-
-
-// ========================================================
-// 7. ОТДЕЛЬНОЕ ОКНО ИИ-ПОМОЩНИКА (ИНЖЕНЕРНЫЙ АНАЛИТИК)
-// ========================================================
-
-function toggleAiDrawer() {
-  const drawer = document.getElementById('aiAssistantDrawer');
-  if (drawer.classList.contains('open')) {
-    closeAiDrawer();
-  } else {
-    openAiDrawer('summary');
-  }
-}
-
-function openAiDrawer(initialTab = 'summary') {
-  const drawer = document.getElementById('aiAssistantDrawer');
-  drawer.classList.add('open');
-  switchAiDrawerTab(initialTab);
-}
-
-function closeAiDrawer() {
-  const drawer = document.getElementById('aiAssistantDrawer');
-  drawer.classList.remove('open');
-}
-
-function switchAiDrawerTab(tabId) {
-  const tabs = ['summary', 'toc', 'plan', 'normo', 'chat'];
-  tabs.forEach(t => {
-    const btn = document.getElementById(`aiTabBtn${capitalize(t)}`);
-    const pane = document.getElementById(`aiPane${capitalize(t)}`);
-    if (btn) btn.classList.toggle('active', t === tabId);
-    if (pane) pane.style.display = t === tabId ? 'block' : 'none';
-  });
-
-  if (tabId === 'summary') renderAiDrawerSummary();
-  if (tabId === 'toc') renderAiDrawerToc();
-  if (tabId === 'normo') renderAiDrawerNormo();
-}
-
-function capitalize(str) {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
-function renderAiDrawerSummary() {
-  if (!currentDoc) return;
-  const t = currentDoc.title_data || {};
-  const specialtyEl = document.getElementById('aiDocSpecialty');
-  const typeEl = document.getElementById('aiDocType');
-  const topicEl = document.getElementById('aiDocTopic');
-  const authorEl = document.getElementById('aiDocAuthor');
-  const versionEl = document.getElementById('aiDocVersion');
-
-  if (specialtyEl) specialtyEl.textContent = currentDoc.author_specialty || 'Специалист';
-  if (typeEl) typeEl.textContent = t.doc_type || 'ТЕХНИЧЕСКИЙ ОТЧЕТ';
-  if (topicEl) topicEl.textContent = t.topic || 'Без темы';
-  if (authorEl) authorEl.textContent = t.author_name || currentUser.name;
-  if (versionEl) versionEl.textContent = `v${(currentDoc.versions && currentDoc.versions.length) || 1}`;
-
-  // Краткое резюме из первого раздела
-  const sec1 = (currentDoc.sections && currentDoc.sections[0]) ? currentDoc.sections[0].content : '';
-  const cleanSummary = sec1 ? sec1.slice(0, 300).trim() + '...' : 'Технический отчет подготовлен в соответствии с требованиями отраслевых норм безопасности Ростехнадзора.';
-  const summaryTextEl = document.getElementById('aiExecutiveSummaryText');
-  if (summaryTextEl) summaryTextEl.textContent = cleanSummary;
-
-  // Список нормативной базы
-  const normListEl = document.getElementById('aiNormListPreview');
-  if (normListEl) {
-    normListEl.innerHTML = '';
-    const bibs = currentDoc.bibliography || [];
-    if (bibs.length === 0) {
-      normListEl.innerHTML = '<li style="font-size:10px; color:#64748b; font-style:italic;">Источники появятся при цитировании из базы знаний справа.</li>';
-    } else {
-      bibs.slice(0, 4).forEach(b => {
-        const li = document.createElement('li');
-        li.style.cssText = 'font-size:10px; color:#cbd5e1; border-left:2px solid #0284c7; padding-left:6px;';
-        li.textContent = b;
-        normListEl.appendChild(li);
-      });
-    }
-  }
-}
-
-function renderAiDrawerToc() {
-  const container = document.getElementById('aiTocList');
-  if (!container || !currentDoc) return;
-  container.innerHTML = '';
-
-  (currentDoc.sections || []).forEach((sec, idx) => {
-    const item = document.createElement('div');
-    item.style.cssText = 'background:#0b1120; border:1px solid #334155; border-radius:4px; padding:8px;';
-    const charCount = (sec.content || '').length;
-    item.innerHTML = `
-      <div style="font-weight:700; color:#f1f5f9; font-size:11px;">${idx + 1}. ${escapeHtml(sec.title)}</div>
-      <div style="font-size:9px; color:#94a3b8; display:flex; justify-content:space-between; margin-top:3px;">
-        <span>Символов: ${charCount}</span>
-        <span style="color:#10b981;">Норматив ГОСТ соблюден</span>
-      </div>
-    `;
-    container.appendChild(item);
-  });
-}
-
-function renderAiDrawerNormo() {
-  const checklist = document.getElementById('aiDrawerChecklist');
-  if (!checklist) return;
-  checklist.innerHTML = '';
-
-  const checks = [
-    { title: 'Поля страницы: левое 30 мм, правое 15 мм, верх/низ 20 мм (ГОСТ 7.32)', pass: true },
-    { title: 'Шрифт основного текста: Times New Roman 14 pt, интервал 1.5', pass: true },
-    { title: 'Абзацный отступ (красная строка): 1.25 см', pass: true },
-    { title: 'Оформление списка литературы по ГОСТ Р 7.0.5-2008', pass: (currentDoc?.bibliography || []).length > 0 },
-    { title: 'Исключение служебных меток и квадратных скобок в чистовом файле', pass: true }
-  ];
-
-  checks.forEach(c => {
-    const li = document.createElement('li');
-    li.style.cssText = 'font-size:11px; display:flex; align-items:center; gap:6px; color:#cbd5e1; padding:3px 0;';
-    li.innerHTML = `
-      <span style="color:${c.pass ? '#10b981' : '#f59e0b'}; font-weight:bold;">${c.pass ? '✓' : '—'}</span>
-      <span>${escapeHtml(c.title)}</span>
-    `;
-    checklist.appendChild(li);
-  });
-}
-
-async function executeAiDrawerQuery() {
-  const input = document.getElementById('aiDrawerQueryInput');
-  const query = input.value.trim();
-  if (!query) return;
-
-  const answerBox = document.getElementById('aiDrawerAnswerBox');
-  answerBox.innerHTML = '<span style="color:#38bdf8;">Обработка запроса по нормативной базе Ростехнадзора и ГОСТ...</span>';
-  input.value = '';
-
-  try {
-    const res = await fetch('/api/ai/ask', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        question: query,
-        context: (currentDoc?.sections || []).map(s => s.content).join('\n')
-      })
-    });
-    const data = await res.json();
-    answerBox.innerHTML = `
-      <div style="font-weight:700; color:#38bdf8; margin-bottom:4px;">Запрос: «${escapeHtml(query)}»</div>
-      <div style="color:#f1f5f9; line-height:1.45;">${escapeHtml(data.answer)}</div>
-    `;
-  } catch (err) {
-    answerBox.innerHTML = '<span style="color:#ef4444;">Не удалось связаться с аналитическим сервисом.</span>';
+    showToastNotification('Не удалось загрузить документ.');
   }
 }
 

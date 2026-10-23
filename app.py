@@ -58,6 +58,10 @@ class DocumentSaveModel(BaseModel):
     author_specialty: Optional[str] = "Работники АЭС"
     specialty_id: Optional[str] = "npp"
     status: Optional[str] = "draft"
+    current_version: Optional[int] = None
+    versions: Optional[List[Dict]] = None
+    active_review_comments: Optional[List[Dict]] = None
+    reviews: Optional[List[Dict]] = None
     title_data: TitleDataModel
     sections: List[SectionModel]
     bibliography: List[str] = []
@@ -67,6 +71,7 @@ class DocumentSaveModel(BaseModel):
 class ReviewCommentModel(BaseModel):
     section_index: Optional[int] = 0
     target_text: str
+    tool: Optional[str] = "highlight-red"
     note: str
     severity: Optional[str] = "error"  # error, warning, info
 

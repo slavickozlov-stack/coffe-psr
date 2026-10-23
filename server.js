@@ -636,36 +636,25 @@ app.post('/api/documents/:doc_id/submit', (req, res) => {
   if (!Array.isArray(doc.versions)) {
     doc.versions = [];
   }
+  if (!doc.current_version) {
+    doc.current_version = 1;
+  }
 
-  const vNum = doc.versions.length + 1;
-  doc.current_version = vNum;
-
+  const vNum = doc.current_version;
   let changelog = (req.body && req.body.changelog) || '';
   if (!changelog) {
     changelog =
       vNum === 1
-        ? 'Версия 1: Первоначальная отправка на нормоконтроль'
-        : `Версия ${vNum}: Исправления по замечаниям нормоконтроля`;
+        ? 'Версия v1: Отправка отчета на нормоконтроль'
+        : `Версия v${vNum}: Доработанная редакция после замечаний нормоконтроля`;
   }
-
-  const snapshot = {
-    version_number: vNum,
-    created_at: new Date().toISOString(),
-    changelog,
-    title_data: JSON.parse(JSON.stringify(doc.title_data || {})),
-    sections: JSON.parse(JSON.stringify(doc.sections || [])),
-    bibliography: [...(doc.bibliography || [])],
-    author_name: doc.author_name || 'Козлов В.А.',
-    author_specialty: doc.author_specialty || 'Специалист'
-  };
-
-  doc.versions.push(snapshot);
+  doc.last_submit_changelog = changelog;
   doc.active_review_comments = [];
 
   const saved = saveDocumentToDb(doc);
   res.json({
     success: true,
-    message: 'Документ успешно отправлен на проверку',
+    message: `Документ (v${vNum}) отправлен на проверку`,
     document: saved
   });
 });
@@ -674,25 +663,7 @@ function getVersionsForDoc(docId) {
   const docs = readJson(DOCS_FILE, []);
   const doc = docs.find(d => d.id === docId);
   if (!doc) return null;
-
-  let versions = doc.versions || [];
-  if (versions.length === 0 && doc.status === 'review') {
-    const v1 = {
-      version_number: 1,
-      created_at: doc.created_at || new Date().toISOString(),
-      changelog: 'Версия 1: Первоначальная отправка на нормоконтроль',
-      title_data: doc.title_data || {},
-      sections: doc.sections || [],
-      bibliography: doc.bibliography || [],
-      author_name: doc.author_name || 'Козлов В.А.',
-      author_specialty: doc.author_specialty || 'Специалист'
-    };
-    doc.versions = [v1];
-    doc.current_version = 1;
-    saveDocumentToDb(doc);
-    return [v1];
-  }
-  return versions;
+  return Array.isArray(doc.versions) ? doc.versions : [];
 }
 
 app.get('/api/documents/:doc_id/versions', (req, res) => {
@@ -730,24 +701,10 @@ app.post('/api/documents/:doc_id/versions/:version_number/restore', (req, res) =
   doc.status = 'draft';
   doc.active_review_comments = [];
 
-  const newVNum = (doc.versions ? doc.versions.length : 0) + 1;
-  doc.current_version = newVNum;
-  if (!Array.isArray(doc.versions)) doc.versions = [];
-  doc.versions.push({
-    version_number: newVNum,
-    created_at: new Date().toISOString(),
-    changelog: `Восстановлено из Версии ${vNum}`,
-    title_data: JSON.parse(JSON.stringify(doc.title_data)),
-    sections: JSON.parse(JSON.stringify(doc.sections)),
-    bibliography: [...doc.bibliography],
-    author_name: doc.author_name || 'Козлов В.А.',
-    author_specialty: doc.author_specialty || 'Специалист'
-  });
-
   const saved = saveDocumentToDb(doc);
   res.json({
     success: true,
-    message: `Документ восстановлен из версии ${vNum}`,
+    message: `Текст документа загружен из версии v${vNum}`,
     document: saved
   });
 });
@@ -792,13 +749,14 @@ app.post('/api/documents/:doc_id/review', (req, res) => {
 
   const { reviewer_name, status, general_feedback, comments = [] } = req.body || {};
   doc.status = status;
-  const currentV = doc.current_version || (doc.versions && doc.versions.length) || 1;
+  const currentV = doc.current_version || 1;
+  const now = new Date().toISOString();
 
   const reviewEntry = {
     id: `rev-${crypto.randomUUID().slice(0, 8)}`,
     reviewer_name: reviewer_name || 'Профессор Смирнов А.В.',
     status,
-    date: new Date().toISOString(),
+    date: now,
     general_feedback: general_feedback || '',
     comments,
     version_reviewed: currentV
@@ -807,8 +765,40 @@ app.post('/api/documents/:doc_id/review', (req, res) => {
   if (!Array.isArray(doc.reviews)) doc.reviews = [];
   doc.reviews.push(reviewEntry);
 
+  if (!Array.isArray(doc.versions)) doc.versions = [];
+
+  // Сохраняем проверенную версию (например v1) вместе со всеми пометками проверяющего в память версий
+  const versionSnapshot = {
+    version_number: currentV,
+    created_at: now,
+    changelog:
+      doc.last_submit_changelog ||
+      (currentV === 1
+        ? 'Версия v1 (проверена нормоконтролем)'
+        : `Версия v${currentV} (проверена нормоконтролем)`),
+    title_data: JSON.parse(JSON.stringify(doc.title_data || {})),
+    sections: JSON.parse(JSON.stringify(doc.sections || [])),
+    bibliography: [...(doc.bibliography || [])],
+    author_name: doc.author_name || 'Козлов В.А.',
+    author_specialty: doc.author_specialty || 'Специалист',
+    reviewer_name: reviewer_name || 'Профессор Смирнов А.В.',
+    reviewed_at: now,
+    review_status: status,
+    general_feedback: general_feedback || '',
+    review_comments: JSON.parse(JSON.stringify(comments || []))
+  };
+
+  const existingVerIdx = doc.versions.findIndex(v => v.version_number === currentV);
+  if (existingVerIdx !== -1) {
+    doc.versions[existingVerIdx] = versionSnapshot;
+  } else {
+    doc.versions.push(versionSnapshot);
+  }
+
   if (status === 'returned') {
     doc.active_review_comments = comments;
+  } else {
+    doc.active_review_comments = [];
   }
 
   const updatedDoc = saveDocumentToDb(doc);

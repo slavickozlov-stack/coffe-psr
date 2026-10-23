@@ -568,20 +568,35 @@ class Database:
             docs = json.load(f)
         
         doc_id = doc_data.get("id")
+        now = datetime.now().isoformat()
         if not doc_id:
             doc_id = f"doc-{uuid.uuid4().hex[:8]}"
             doc_data["id"] = doc_id
-            doc_data["created_at"] = datetime.now().isoformat()
+            doc_data["created_at"] = now
 
-        doc_data["updated_at"] = datetime.now().isoformat()
+        doc_data["updated_at"] = now
 
         updated = False
         for idx, d in enumerate(docs):
             if d.get("id") == doc_id:
+                merged = dict(d)
+                for k, v in doc_data.items():
+                    if v is not None:
+                        merged[k] = v
+                merged.setdefault("versions", d.get("versions", []))
+                merged.setdefault("reviews", d.get("reviews", []))
+                merged.setdefault("active_review_comments", d.get("active_review_comments", []))
+                merged.setdefault("current_version", d.get("current_version", 1))
+                doc_data = merged
                 docs[idx] = doc_data
                 updated = True
                 break
         if not updated:
+            doc_data.setdefault("created_at", now)
+            doc_data["versions"] = doc_data.get("versions") or []
+            doc_data["reviews"] = doc_data.get("reviews") or []
+            doc_data["active_review_comments"] = doc_data.get("active_review_comments") or []
+            doc_data["current_version"] = doc_data.get("current_version") or 1
             docs.insert(0, doc_data)
 
         with open(DOCS_FILE, "w", encoding="utf-8") as f:
@@ -597,51 +612,25 @@ class Database:
         doc["status"] = "review"
         if "versions" not in doc:
             doc["versions"] = []
+        if not doc.get("current_version"):
+            doc["current_version"] = 1
 
-        v_num = len(doc["versions"]) + 1
-        doc["current_version"] = v_num
-
+        v_num = doc["current_version"]
         if not changelog:
             if v_num == 1:
-                changelog = "Версия 1: Первоначальная отправка на нормоконтроль"
+                changelog = "Версия v1: Отправка отчета на нормоконтроль"
             else:
-                changelog = f"Версия {v_num}: Исправления по замечаниям нормоконтроля"
+                changelog = f"Версия v{v_num}: Доработанная редакция после замечаний нормоконтроля"
 
-        snapshot = {
-            "version_number": v_num,
-            "created_at": datetime.now().isoformat(),
-            "changelog": changelog,
-            "title_data": json.loads(json.dumps(doc.get("title_data", {}))),
-            "sections": json.loads(json.dumps(doc.get("sections", []))),
-            "bibliography": list(doc.get("bibliography", [])),
-            "author_name": doc.get("author_name", "Козлов В.А."),
-            "author_specialty": doc.get("author_specialty", "Специалист")
-        }
-        doc["versions"].append(snapshot)
-        doc["active_review_comments"] = []  # Очищаем активные замечания при новой отправке
+        doc["last_submit_changelog"] = changelog
+        doc["active_review_comments"] = []
         return self.save_document(doc)
 
     def get_versions(self, doc_id: str) -> List[Dict]:
         doc = self.get_document(doc_id)
         if not doc:
             return []
-        versions = doc.get("versions", [])
-        if not versions and doc.get("status") == "review":
-            v1 = {
-                "version_number": 1,
-                "created_at": doc.get("created_at", datetime.now().isoformat()),
-                "changelog": "Версия 1: Первоначальная отправка на нормоконтроль",
-                "title_data": doc.get("title_data", {}),
-                "sections": doc.get("sections", []),
-                "bibliography": doc.get("bibliography", []),
-                "author_name": doc.get("author_name", "Козлов В.А."),
-                "author_specialty": doc.get("author_specialty", "Специалист")
-            }
-            doc["versions"] = [v1]
-            doc["current_version"] = 1
-            self.save_document(doc)
-            return [v1]
-        return versions
+        return doc.get("versions", [])
 
     def get_version(self, doc_id: str, version_number: int) -> Optional[Dict]:
         versions = self.get_versions(doc_id)
@@ -665,20 +654,6 @@ class Database:
         doc["status"] = "draft"
         doc["active_review_comments"] = []
 
-        # Записываем событие восстановления в версии
-        new_v_num = len(doc.get("versions", [])) + 1
-        doc["current_version"] = new_v_num
-        doc.setdefault("versions", []).append({
-            "version_number": new_v_num,
-            "created_at": datetime.now().isoformat(),
-            "changelog": f"Восстановлено из Версии {version_number}",
-            "title_data": json.loads(json.dumps(doc["title_data"])),
-            "sections": json.loads(json.dumps(doc["sections"])),
-            "bibliography": list(doc["bibliography"]),
-            "author_name": doc.get("author_name", "Козлов В.А."),
-            "author_specialty": doc.get("author_specialty", "Специалист")
-        })
-
         return self.save_document(doc)
 
     def add_review(self, doc_id: str, reviewer_name: str, status: str, comments: List[Dict], general_feedback: str) -> Optional[Dict]:
@@ -687,12 +662,14 @@ class Database:
             return None
 
         doc["status"] = status
-        current_v = doc.get("current_version", len(doc.get("versions", [])) or 1)
+        current_v = doc.get("current_version") or 1
+        now = datetime.now().isoformat()
+
         review_entry = {
             "id": f"rev-{uuid.uuid4().hex[:8]}",
             "reviewer_name": reviewer_name,
             "status": status,
-            "date": datetime.now().isoformat(),
+            "date": now,
             "general_feedback": general_feedback,
             "comments": comments,
             "version_reviewed": current_v
@@ -701,8 +678,40 @@ class Database:
             doc["reviews"] = []
         doc["reviews"].append(review_entry)
 
+        if "versions" not in doc:
+            doc["versions"] = []
+
+        version_snapshot = {
+            "version_number": current_v,
+            "created_at": now,
+            "changelog": doc.get("last_submit_changelog") or (
+                "Версия v1 (проверена нормоконтролем)" if current_v == 1 else f"Версия v{current_v} (проверена нормоконтролем)"
+            ),
+            "title_data": json.loads(json.dumps(doc.get("title_data", {}))),
+            "sections": json.loads(json.dumps(doc.get("sections", []))),
+            "bibliography": list(doc.get("bibliography", [])),
+            "author_name": doc.get("author_name", "Козлов В.А."),
+            "author_specialty": doc.get("author_specialty", "Специалист"),
+            "reviewer_name": reviewer_name,
+            "reviewed_at": now,
+            "review_status": status,
+            "general_feedback": general_feedback,
+            "review_comments": json.loads(json.dumps(comments or []))
+        }
+
+        replaced = False
+        for idx, v in enumerate(doc["versions"]):
+            if v.get("version_number") == current_v:
+                doc["versions"][idx] = version_snapshot
+                replaced = True
+                break
+        if not replaced:
+            doc["versions"].append(version_snapshot)
+
         if status == "returned":
             doc["active_review_comments"] = comments
+        else:
+            doc["active_review_comments"] = []
 
         return self.save_document(doc)
 
